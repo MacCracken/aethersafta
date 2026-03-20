@@ -503,7 +503,8 @@ mod tests {
 
         let frame = comp.compose(&scene, &HashMap::new(), 0);
         assert_eq!(&frame.data[0..4], [255, 0, 255, 0]);
-        let idx = (0 * 4 + 2) * 4;
+        // pixel (2,0) should be transparent (outside layer bounds)
+        let idx = 2 * 4; // column 2, row 0
         assert_eq!(frame.data[idx], 0);
     }
 
@@ -540,24 +541,15 @@ mod tests {
         // This exercises the SIMD blend_row_alpha path
         let comp = Compositor::new(8, 8);
         let mut scene = SceneGraph::new(8, 8, 30);
-        let layer = Layer::new(
+        let mut layer = Layer::new(
             "src",
             LayerContent::Source {
                 source_id: uuid::Uuid::nil(),
             },
         );
-        let layer_id = layer.id;
-
-        let mut l = scene
-            .layers()
-            .iter()
-            .find(|_| true)
-            .cloned()
-            .unwrap_or_else(|| layer.clone());
-        l = layer;
-        l.opacity = 0.8;
-        let lid = l.id;
-        scene.add_layer(l);
+        layer.opacity = 0.8;
+        let lid = layer.id;
+        scene.add_layer(layer);
 
         // White opaque source
         let src_frame = RawFrame {
