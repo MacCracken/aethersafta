@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 use image::ImageReader;
 use uuid::Uuid;
 
-use super::{RawFrame, Source, SourceId};
+use super::{PixelFormat, RawFrame, Source, SourceId};
 
 /// A source that produces frames from a static image file.
 #[derive(Debug, Clone)]
@@ -49,6 +49,7 @@ impl ImageSource {
             path: path.to_path_buf(),
             frame: RawFrame {
                 data: argb,
+                format: PixelFormat::Argb8888,
                 width,
                 height,
                 pts_us: 0,
@@ -64,6 +65,7 @@ impl ImageSource {
             path: PathBuf::new(),
             frame: RawFrame {
                 data,
+                format: PixelFormat::Argb8888,
                 width,
                 height,
                 pts_us: 0,

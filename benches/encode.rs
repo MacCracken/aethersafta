@@ -19,6 +19,7 @@ fn make_argb_frame(width: u32, height: u32, pts_us: u64) -> aethersafta::source:
     }
     aethersafta::source::RawFrame {
         data,
+        format: aethersafta::source::PixelFormat::Argb8888,
         width,
         height,
         pts_us,

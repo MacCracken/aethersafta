@@ -1,6 +1,7 @@
 //! Input sources: screen capture, camera, media files, images.
 
 pub mod image;
+pub mod synthetic;
 
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -8,11 +9,22 @@ use uuid::Uuid;
 /// Unique source identifier.
 pub type SourceId = Uuid;
 
+/// Pixel format of a raw frame.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum PixelFormat {
+    /// 4 bytes per pixel: [A, R, G, B].
+    Argb8888,
+    /// Semi-planar YUV 4:2:0: Y plane (w*h) + interleaved UV plane (w*h/2).
+    Nv12,
+}
+
 /// A raw uncompressed frame from a source.
 #[derive(Debug, Clone)]
 pub struct RawFrame {
-    /// Frame data in ARGB8888 format.
+    /// Raw pixel data.
     pub data: Vec<u8>,
+    /// Pixel format.
+    pub format: PixelFormat,
     /// Width in pixels.
     pub width: u32,
     /// Height in pixels.
@@ -22,14 +34,27 @@ pub struct RawFrame {
 }
 
 impl RawFrame {
-    /// Expected byte length for the given dimensions (4 bytes per pixel).
+    /// Expected byte length for ARGB8888 at the given dimensions.
     pub fn expected_size(width: u32, height: u32) -> usize {
-        width as usize * height as usize * 4
+        Self::expected_size_for(PixelFormat::Argb8888, width, height)
     }
 
-    /// Whether the data length matches the expected size.
+    /// Expected byte length for a given format and dimensions.
+    pub fn expected_size_for(format: PixelFormat, width: u32, height: u32) -> usize {
+        match format {
+            PixelFormat::Argb8888 => width as usize * height as usize * 4,
+            // Y plane: w*h, UV plane: w*(h/2) interleaved
+            PixelFormat::Nv12 => {
+                let w = width as usize;
+                let h = height as usize;
+                w * h + w * (h / 2)
+            }
+        }
+    }
+
+    /// Whether the data length matches the expected size for this frame's format.
     pub fn is_valid(&self) -> bool {
-        self.data.len() == Self::expected_size(self.width, self.height)
+        self.data.len() == Self::expected_size_for(self.format, self.width, self.height)
     }
 }
 
@@ -73,6 +98,7 @@ mod tests {
     fn raw_frame_valid() {
         let frame = RawFrame {
             data: vec![0u8; 1920 * 1080 * 4],
+            format: PixelFormat::Argb8888,
             width: 1920,
             height: 1080,
             pts_us: 0,
@@ -84,11 +110,34 @@ mod tests {
     fn raw_frame_invalid_size() {
         let frame = RawFrame {
             data: vec![0u8; 100],
+            format: PixelFormat::Argb8888,
             width: 1920,
             height: 1080,
             pts_us: 0,
         };
         assert!(!frame.is_valid());
+    }
+
+    #[test]
+    fn nv12_expected_size() {
+        // 1920x1080 NV12: Y=1920*1080 + UV=1920*540 = 2073600 + 1036800 = 3110400
+        assert_eq!(
+            RawFrame::expected_size_for(PixelFormat::Nv12, 1920, 1080),
+            1920 * 1080 + 1920 * 540
+        );
+    }
+
+    #[test]
+    fn nv12_frame_valid() {
+        let size = RawFrame::expected_size_for(PixelFormat::Nv12, 4, 4);
+        let frame = RawFrame {
+            data: vec![128u8; size],
+            format: PixelFormat::Nv12,
+            width: 4,
+            height: 4,
+            pts_us: 0,
+        };
+        assert!(frame.is_valid());
     }
 
     #[test]

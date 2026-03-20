@@ -48,7 +48,8 @@ pub use output::{OutputConfig, OutputSink};
 pub use scene::compositor::Compositor;
 pub use scene::{Layer, LayerId, SceneGraph};
 pub use source::image::ImageSource;
-pub use source::{RawFrame, Source, SourceId};
+pub use source::synthetic::SyntheticSource;
+pub use source::{PixelFormat, RawFrame, Source, SourceId};
 pub use timing::{FrameClock, LatencyBudget};
 
 #[cfg(test)]

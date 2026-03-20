@@ -53,6 +53,7 @@ fn bench_visible_layers(c: &mut Criterion) {
 fn make_argb_frame(width: u32, height: u32, val: u8) -> RawFrame {
     RawFrame {
         data: vec![val; (width * height * 4) as usize],
+        format: aethersafta::source::PixelFormat::Argb8888,
         width,
         height,
         pts_us: 0,
