@@ -1,0 +1,66 @@
+[package]
+name = "aethersafta"
+version = "0.20.3"
+edition = "2024"
+rust-version = "1.89"
+license = "AGPL-3.0-only"
+description = "Real-time media compositing engine — multi-source capture, scene graph, hardware-accelerated encoding, streaming output"
+homepage = "https://github.com/MacCracken/aethersafta"
+repository = "https://github.com/MacCracken/aethersafta"
+readme = "README.md"
+keywords = ["compositing", "streaming", "capture", "video", "encoding"]
+categories = ["multimedia", "multimedia::video", "multimedia::encoding"]
+
+[features]
+default = ["pipewire", "hwaccel"]
+full = ["pipewire", "hwaccel", "rtmp", "srt"]
+# Audio capture
+pipewire = ["dep:pipewire"]
+# Hardware-accelerated encoding (NVENC, VA-API, QSV, AMF)
+hwaccel = ["dep:ai-hwaccel"]
+# Streaming output protocols
+rtmp = []
+srt = []
+
+[[bin]]
+name = "aethersafta"
+path = "src/main.rs"
+
+[dependencies]
+# Core
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+chrono = { version = "0.4", features = ["serde"] }
+uuid = { version = "1", features = ["v4", "serde"] }
+thiserror = "2"
+anyhow = "1"
+bytes = "1"
+
+# Async
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "time", "signal", "sync", "io-util"] }
+
+# Logging
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# CLI
+clap = { version = "4", features = ["derive"] }
+
+# Media encoding/muxing
+# Use path deps during development; switch to crates.io versions on release
+tarang = { version = "0.19", default-features = false }
+
+# Hardware detection
+ai-hwaccel = { version = "0.19", optional = true, default-features = false }
+
+# Audio capture
+pipewire = { version = "0.9", optional = true }
+
+[dev-dependencies]
+tempfile = "3"
+criterion = { version = "0.5", features = ["html_reports"] }
+tokio-test = "0.4"
+
+[[bench]]
+name = "compose"
+harness = false
