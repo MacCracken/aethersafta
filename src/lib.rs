@@ -36,16 +36,19 @@
 //! // scene.start(config)?;
 //! ```
 
-pub mod scene;
-pub mod source;
 pub mod encode;
 pub mod output;
+pub mod scene;
+pub mod source;
 pub mod timing;
 
-pub use scene::{Layer, LayerId, SceneGraph};
-pub use source::{RawFrame, Source, SourceId};
 pub use encode::{EncodePipeline, EncoderConfig};
+pub use output::file::FileOutput;
 pub use output::{OutputConfig, OutputSink};
+pub use scene::compositor::Compositor;
+pub use scene::{Layer, LayerId, SceneGraph};
+pub use source::image::ImageSource;
+pub use source::{RawFrame, Source, SourceId};
 pub use timing::{FrameClock, LatencyBudget};
 
 #[cfg(test)]

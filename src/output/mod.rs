@@ -1,5 +1,7 @@
 //! Output sinks: file recording, RTMP streaming, SRT streaming.
 
+pub mod file;
+
 use serde::{Deserialize, Serialize};
 
 /// An encoded packet ready for output.
@@ -24,7 +26,10 @@ pub enum OutputConfig {
     /// Stream via RTMP.
     Rtmp { url: String, stream_key: String },
     /// Stream via SRT.
-    Srt { address: String, passphrase: Option<String> },
+    Srt {
+        address: String,
+        passphrase: Option<String>,
+    },
 }
 
 impl OutputConfig {
@@ -88,7 +93,10 @@ mod tests {
         let json = serde_json::to_string(&cfg).unwrap();
         let back: OutputConfig = serde_json::from_str(&json).unwrap();
         match back {
-            OutputConfig::Srt { address, passphrase } => {
+            OutputConfig::Srt {
+                address,
+                passphrase,
+            } => {
                 assert!(address.contains("9000"));
                 assert_eq!(passphrase.unwrap(), "secret");
             }

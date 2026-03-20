@@ -1,5 +1,7 @@
 //! Input sources: screen capture, camera, media files, images.
 
+pub mod image;
+
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 

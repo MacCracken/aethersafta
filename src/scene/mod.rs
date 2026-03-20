@@ -4,6 +4,8 @@
 //! the compositor iterates layers bottom-to-top, alpha-blending each onto
 //! the output buffer.
 
+pub mod compositor;
+
 use std::fmt;
 
 use serde::{Deserialize, Serialize};
@@ -181,9 +183,19 @@ mod tests {
     #[test]
     fn layers_sorted_by_z_index() {
         let mut scene = SceneGraph::new(1920, 1080, 30);
-        let mut top = Layer::new("top", LayerContent::ColorFill { color: [255, 0, 0, 255] });
+        let mut top = Layer::new(
+            "top",
+            LayerContent::ColorFill {
+                color: [255, 0, 0, 255],
+            },
+        );
         top.z_index = 10;
-        let mut bottom = Layer::new("bottom", LayerContent::ColorFill { color: [0, 0, 255, 255] });
+        let mut bottom = Layer::new(
+            "bottom",
+            LayerContent::ColorFill {
+                color: [0, 0, 255, 255],
+            },
+        );
         bottom.z_index = 1;
 
         scene.add_layer(top);

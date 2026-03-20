@@ -6,7 +6,7 @@ Completed items are in [CHANGELOG.md](../../CHANGELOG.md).
 
 ---
 
-## v0.5.0 — Core Compositing
+## v0.20.3 — Core Compositing
 
 Foundation: scene graph, single-source capture, file recording.
 
