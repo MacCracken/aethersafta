@@ -62,7 +62,7 @@ See [docs/architecture/overview.md](docs/architecture/overview.md) for the full 
 
 ```toml
 [dependencies]
-aethersafta = "0.20.4"
+aethersafta = "0.20"
 ```
 
 ```rust
@@ -230,8 +230,7 @@ println!("Headroom: {} µs", budget.headroom_us());
 
 | Version | Milestone | Key features |
 |---------|-----------|--------------|
-| ~~0.20.3~~ | ~~Core compositing~~ | ~~Scene graph, compositor, H.264 encode, SSE2 SIMD, NV12, CLI~~ |
-| **0.20.4** | Hardening & optimization | 3–5 rounds code audit + 3–5 rounds perf/memory optimization |
+| **0.20.3** | Core compositing + hardening | Scene graph, compositor, H.264 encode, SSE2 SIMD, code audit, perf optimization |
 | **0.6.0** | Multi-source & HW encode | Concurrent capture, V4L2 cameras, NVENC/VA-API/QSV via ai-hwaccel |
 | **0.7.0** | Overlays & scene switching | Text/image overlays, transitions (cut/fade/slide), scene presets, IPC |
 | **0.8.0** | Streaming output | RTMP (Twitch/YouTube), SRT low-latency, multi-output |

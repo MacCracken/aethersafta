@@ -6,17 +6,7 @@ Completed items are in [CHANGELOG.md](../../CHANGELOG.md).
 
 ---
 
-## v0.20.3 — Core Compositing ✓
-
-Foundation: scene graph, single-source capture, file recording.
-
-Remaining from v0.20.3 (moved to later milestones):
-- [ ] Screen capture via Wayland `wlr-screencopy-unstable-v1` protocol → v0.6.0
-- [ ] Media file source (video playback via tarang decode) → v0.6.0
-
----
-
-## v0.20.4 — Hardening & Optimization
+## v0.20.3 — Core Compositing + Hardening
 
 Code quality, correctness, and performance passes before expanding scope.
 
