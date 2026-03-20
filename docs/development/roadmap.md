@@ -6,40 +6,54 @@ Completed items are in [CHANGELOG.md](../../CHANGELOG.md).
 
 ---
 
-## v0.20.3 — Core Compositing
+## v0.20.3 — Core Compositing ✓
 
 Foundation: scene graph, single-source capture, file recording.
 
-### Scene graph
-- [ ] `SceneGraph` with ordered `Layer` list (z-index, position, size, opacity)
-- [ ] `Layer` types: source, overlay (text/image), color fill
-- [ ] Add/remove/reorder layers at runtime
-- [ ] Per-layer transform: position, scale, crop, rotation
+Remaining from v0.20.3 (moved to later milestones):
+- [ ] Screen capture via Wayland `wlr-screencopy-unstable-v1` protocol → v0.6.0
+- [ ] Media file source (video playback via tarang decode) → v0.6.0
 
-### Sources
-- [ ] `Source` trait with `capture_frame()` → `RawFrame`
-- [ ] Screen capture via Wayland `wlr-screencopy-unstable-v1` protocol
-- [ ] Static image source (PNG/JPEG via `image` crate)
-- [ ] Media file source (video playback via tarang decode)
+---
 
-### Compositor
-- [ ] Per-frame compositing: iterate layers, alpha-blend onto output buffer
-- [ ] ARGB8888 and NV12 pixel format support
-- [ ] Configurable output resolution and framerate
+## v0.20.4 — Hardening & Optimization
 
-### Recording output
-- [ ] File output sink (MP4 via tarang mux)
-- [ ] Software encoding fallback (tarang pure-Rust H.264/VP9)
-- [ ] Frame-accurate A/V sync via PTS alignment
+Code quality, correctness, and performance passes before expanding scope.
 
-### CLI
-- [ ] `aethersafta record --source screen --output recording.mp4`
-- [ ] `aethersafta preview --source screen` (display composited output)
+### Code audit (3–5 rounds)
 
-### Testing
-- [ ] Unit tests for scene graph operations (add/remove/reorder)
-- [ ] Integration tests with synthetic frame sources
-- [ ] Benchmark: compositor throughput at 1080p/4K
+Each round: read every module, fix issues found, run full CI.
+
+- [ ] Round 1: `unsafe` review — verify all SIMD/FFI blocks, add `// SAFETY:` comments, fuzz edge cases (zero-size frames, odd dimensions, empty scenes)
+- [ ] Round 2: Error handling — replace `unwrap()`/`expect()` in non-test code with proper `Result` propagation, add error context with `anyhow::Context`
+- [ ] Round 3: API surface — audit public types for consistency (naming, builder patterns, `#[must_use]`), ensure `Send`/`Sync` bounds are correct, review serde representations
+- [ ] Round 4: Bounds & overflow — check all `as` casts for truncation, verify clip rect arithmetic with `i32::MAX`/`u32::MAX` inputs, add property-based tests (proptest)
+- [ ] Round 5: Dependency hygiene — remove unused deps, minimize feature flags, audit transitive `unsafe` with `cargo-geiger`, update `cargo-vet` supply chain
+
+### Performance & memory optimization (3–5 rounds)
+
+Each round: profile, optimize hotspot, benchmark before/after.
+
+- [ ] Round 1: Allocations — profile with DHAT, eliminate per-frame `Vec` allocations in compositor (reuse output buffer), pool `RawFrame` buffers
+- [ ] Round 2: Color conversion — SIMD `argb_to_yuv420p` and `argb_to_nv12` (currently scalar, ~4ms at 1080p), target <1ms
+- [ ] Round 3: Compositor scaling — SIMD path for nearest-neighbour scaled blending (currently 12ms scalar at 480p→1080p), reduce gather overhead
+- [ ] Round 4: Encode pipeline — avoid ARGB→YUV copy when source is already NV12, direct NV12 compositing path for single-layer capture
+- [ ] Round 5: Cache & prefetch — optimize memory access patterns for L2 cache locality, benchmark with `perf stat` for cache miss rates
+
+### Benchmarking infrastructure
+- [ ] Establish v0.20.3 baselines as golden numbers in `docs/development/performance.md`
+- [ ] Benchmark regression CI gate (fail on >10% regression from baseline)
+- [ ] Add end-to-end pipeline benchmark: source → composite → encode → file (1080p30, 5s)
+- [ ] Add multi-layer benchmark matrix: 1/3/5/10 layers × 720p/1080p/4K
+- [ ] Add memory benchmark: peak RSS during 10s recording at 1080p30
+- [ ] Latency percentile tracking: p50/p95/p99 per-frame times over 1000-frame runs
+- [ ] HTML benchmark dashboard via criterion (auto-generated, checked into `target/criterion/`)
+- [ ] Compare across feature configs: `--no-default-features` vs `--features openh264-enc` vs `--features full`
+
+### Testing hardening
+- [ ] Property-based tests for compositor (proptest: random layers, positions, opacities)
+- [ ] Fuzz testing for NV12/YUV conversion edge cases
+- [ ] Coverage target: 85%+ line coverage
 
 ---
 
@@ -125,7 +139,7 @@ Foundation: scene graph, single-source capture, file recording.
 - [ ] Nazar integration for monitoring dashboard
 
 ### Performance
-- [x] SIMD alpha blending — SSE2 row-level blend, 11ms→1.2ms per 1080p layer (9.4x)
+- [ ] AVX2 alpha blending (4 pixels/iter, ~2× over current SSE2)
 - [ ] Zero-copy frame path (compositor → encoder without memcpy)
 - [ ] GPU-accelerated compositing via Vulkan compute (optional)
 - [ ] Memory pool for frame buffers (eliminate per-frame allocation)
