@@ -125,7 +125,7 @@ Foundation: scene graph, single-source capture, file recording.
 - [ ] Nazar integration for monitoring dashboard
 
 ### Performance
-- [ ] SIMD alpha blending (source layer blend is memory-bandwidth bound at ~11ms/1080p)
+- [x] SIMD alpha blending — SSE2 row-level blend, 11ms→1.2ms per 1080p layer (9.4x)
 - [ ] Zero-copy frame path (compositor → encoder without memcpy)
 - [ ] GPU-accelerated compositing via Vulkan compute (optional)
 - [ ] Memory pool for frame buffers (eliminate per-frame allocation)

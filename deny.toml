@@ -1,0 +1,71 @@
+# cargo-deny configuration
+# https://embarkstudios.github.io/cargo-deny/
+
+[graph]
+all-features = true
+
+# Lint level for the entire cargo-deny check
+[output]
+feature-depth = 1
+
+# ── licenses ──────────────────────────────────────────────────────────
+
+[licenses]
+# Allow these license identifiers
+allow = [
+    "MIT",
+    "Apache-2.0",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "MPL-2.0",
+    "Zlib",
+    "0BSD",
+    "Unlicense",
+    "CC0-1.0",
+    "Unicode-3.0",
+    "MIT-0",
+    "CDLA-Permissive-2.0",
+    # Copyleft — our own crates and transitive deps
+    "AGPL-3.0-only",
+    "GPL-3.0",
+    "LGPL-2.1-or-later",
+]
+
+# Allow SPDX exceptions (e.g. Apache-2.0 WITH LLVM-exception)
+exceptions = [
+    { allow = ["Apache-2.0 WITH LLVM-exception"], crate = "target-lexicon" },
+    { allow = ["Apache-2.0 WITH LLVM-exception"], crate = "wasi" },
+    { allow = ["Apache-2.0 WITH LLVM-exception"], crate = "wasip2" },
+    { allow = ["Apache-2.0 WITH LLVM-exception"], crate = "wasip3" },
+]
+
+# Some crates use deprecated SPDX identifiers
+[[licenses.clarify]]
+crate = "encoding_rs"
+expression = "(Apache-2.0 OR MIT) AND BSD-3-Clause"
+license-files = [{ path = "COPYRIGHT", hash = 0x39f8ad31 }]
+
+[[licenses.clarify]]
+crate = "unicode-ident"
+expression = "(MIT OR Apache-2.0) AND Unicode-3.0"
+license-files = [{ path = "LICENSE-UNICODE", hash = 0xa7f6571e }]
+
+# ── bans ──────────────────────────────────────────────────────────────
+
+[bans]
+multiple-versions = "warn"
+wildcards = "allow"
+
+# ── advisories ────────────────────────────────────────────────────────
+
+[advisories]
+ignore = []
+
+# ── sources ───────────────────────────────────────────────────────────
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+allow-git = []
