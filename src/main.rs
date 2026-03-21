@@ -134,6 +134,36 @@ fn cmd_info() {
     println!("  (no encoders — build with --features openh264-enc)");
     println!();
 
+    println!("Audio:");
+    println!("  Mixer: dhvani (DSP, metering, mixing)");
+    #[cfg(feature = "pipewire")]
+    {
+        println!("  Capture: PipeWire (via dhvani)");
+        match dhvani::capture::enumerate_devices() {
+            Ok(devices) => {
+                if devices.is_empty() {
+                    println!("  No audio devices detected");
+                } else {
+                    for dev in &devices {
+                        let kind = match dev.device_type {
+                            dhvani::capture::DeviceType::Source => "in",
+                            dhvani::capture::DeviceType::Sink => "out",
+                            _ => "??",
+                        };
+                        println!(
+                            "    [{kind}] {} ({}ch, {}Hz)",
+                            dev.name, dev.channels, dev.sample_rate
+                        );
+                    }
+                }
+            }
+            Err(e) => println!("  PipeWire not available: {e}"),
+        }
+    }
+    #[cfg(not(feature = "pipewire"))]
+    println!("  Capture: (disabled — build with --features pipewire)");
+    println!();
+
     println!("Supported outputs: file (raw H.264 bitstream)");
     #[cfg(feature = "rtmp")]
     println!("  + RTMP streaming");

@@ -4,9 +4,22 @@
 
 Completed items are in [CHANGELOG.md](../../CHANGELOG.md).
 
+### Crate delegation
+
+Aethersafta delegates low-level media work to sibling crates:
+
+| Crate | Role | Key modules used |
+|-------|------|-----------------|
+| [ranga](https://crates.io/crates/ranga) | Image processing, color conversion, blending, filters | `blend`, `convert`, `filter`, `transform`, `composite`, `histogram` |
+| [tarang](https://crates.io/crates/tarang) | Media encoding/decoding, container muxing/demuxing | `audio`, `video`, `demux`, `core` |
+| [dhvani](https://crates.io/crates/dhvani) | Audio DSP, capture, mixing, metering, MIDI | `dsp`, `capture`, `buffer`, `clock`, `meter`, `graph` |
+| [ai-hwaccel](https://crates.io/crates/ai-hwaccel) | Hardware accelerator detection | encoder selection, fallback logic |
+
+Items handled by these crates are noted inline. Aethersafta's scope is **orchestration**: scene graph, source management, pipeline plumbing, transport protocols, and CLI/IPC.
+
 ---
 
-## v0.20.3 — Core Compositing + Hardening
+## v0.21.3 — Core Compositing + Hardening
 
 Code quality, correctness, and performance passes before expanding scope.
 
@@ -37,19 +50,19 @@ Each round: read every module, fix issues found, run full CI.
 - [ ] Round 4: Bounds & overflow — check all `as` casts for truncation, verify clip rect arithmetic with `i32::MAX`/`u32::MAX` inputs, add property-based tests (proptest)
 - [ ] Round 5: Dependency hygiene — remove unused deps, minimize feature flags, audit transitive `unsafe` with `cargo-geiger`, finalize `cargo-vet` supply chain
 
-### Performance & memory optimization (3–5 rounds)
+### Performance & memory optimization
 
 Each round: profile, optimize hotspot, benchmark before/after.
 
 - [ ] Round 1: Allocations — profile with DHAT, eliminate per-frame `Vec` allocations in compositor (reuse output buffer), pool `RawFrame` buffers
-- [ ] Round 2: Color conversion — SIMD `argb_to_yuv420p` and `argb_to_nv12` (currently scalar, ~4ms at 1080p), target <1ms
-- [ ] Round 3: Compositor scaling — SIMD path for nearest-neighbour scaled blending (currently 12ms scalar at 480p→1080p), reduce gather overhead
-- [ ] Round 4: Encode pipeline — avoid ARGB→YUV copy when source is already NV12, direct NV12 compositing path for single-layer capture
-- [ ] Round 5: Cache & prefetch — optimize memory access patterns for L2 cache locality, benchmark with `perf stat` for cache miss rates
+- [ ] Round 2: Encode pipeline — avoid redundant format conversions when ranga already provides the target format, direct NV12 compositing path for single-layer capture
+- [ ] Round 3: Cache & prefetch — optimize memory access patterns for L2 cache locality, benchmark with `perf stat` for cache miss rates
+
+> **Delegated to ranga**: SIMD color conversion (`ranga::convert`), SIMD scaled blending (`ranga::blend` + `ranga::transform`), pixel format interchange.
 
 ### Benchmarking infrastructure
 
-- [ ] Establish v0.20.3 baselines as golden numbers in `docs/development/performance.md`
+- [ ] Establish v0.21.3 baselines as golden numbers in `docs/development/performance.md`
 - [ ] Benchmark regression CI gate (fail on >10% regression from baseline)
 - [ ] Add end-to-end pipeline benchmark: source → composite → encode → file (1080p30, 5s)
 - [ ] Add multi-layer benchmark matrix: 1/3/5/10 layers × 720p/1080p/4K
@@ -60,21 +73,23 @@ Each round: profile, optimize hotspot, benchmark before/after.
 
 ### Testing hardening
 
-- [ ] Fuzz targets: scene graph composition, NV12/YUV conversion, ARGB frame validation (`fuzz/` crate with libfuzzer-sys)
+- [ ] Fuzz targets: scene graph composition, frame validation (`fuzz/` crate with libfuzzer-sys)
 - [ ] Property-based tests for compositor (proptest: random layers, positions, opacities, dimensions)
-- [ ] Roundtrip tests: encode → decode → pixel comparison (when tarang decode available)
+- [ ] Roundtrip tests: encode → decode → pixel comparison (via tarang)
 - [ ] Coverage target: 85%+ line coverage
 - [ ] Integration tests: multi-source composition, error recovery, feature-gated paths
 
+> **Delegated to ranga**: NV12/YUV conversion fuzzing, ARGB frame validation. **Delegated to tarang**: encode/decode roundtrip codec coverage.
+
 ### Remaining from core compositing
 
-Deferred to v0.6.0:
+Deferred to v0.22.0:
 - [ ] Screen capture via Wayland `wlr-screencopy-unstable-v1` protocol
 - [ ] Media file source (video playback via tarang decode)
 
 ---
 
-## v0.6.0 — Multi-Source & Hardware Encoding
+## v0.22.0 — Multi-Source & Capture
 
 ### Multi-source capture
 - [ ] Concurrent capture from multiple sources (screen + camera + media)
@@ -86,21 +101,16 @@ Deferred to v0.6.0:
 - [ ] Device enumeration and capability querying
 - [ ] Auto-detect resolution, framerate, pixel format
 
-### Hardware-accelerated encoding
-- [ ] ai-hwaccel integration for encoder selection
-- [ ] NVENC encoding path (via tarang)
-- [ ] VA-API encoding path (Intel/AMD)
-- [ ] QSV encoding path (Intel Quick Sync)
-- [ ] Automatic fallback: hw → sw when GPU unavailable
+### Audio capture integration
+- [ ] Integrate dhvani PipeWire capture (`dhvani::capture`) for system audio, mic, per-app
+- [ ] Per-source volume control via `dhvani::buffer` mixing + `dhvani::meter`
+- [ ] Audio mixer graph via `dhvani::graph`
 
-### Audio capture
-- [ ] PipeWire audio source (system audio, mic, per-app)
-- [ ] Per-source volume control
-- [ ] Basic mixer: sum sources with gain
+> **Delegated to tarang**: Hardware-accelerated encoding (NVENC, VA-API, QSV) — aethersafta selects encoder via `ai-hwaccel` and passes frames to tarang. **Delegated to dhvani**: PipeWire capture, audio mixing, metering.
 
 ---
 
-## v0.7.0 — Overlays, Transitions & Scene Switching
+## v0.23.0 — Overlays, Transitions & Scene Switching
 
 ### Overlays
 - [ ] Text overlay with font rendering (position, size, color, background)
@@ -110,16 +120,17 @@ Deferred to v0.6.0:
 
 ### Transitions
 - [ ] Cut (instant scene switch)
-- [ ] Crossfade (alpha blend between scenes)
+- [ ] Crossfade via `ranga::composite`
 - [ ] Slide (push/reveal direction)
 - [ ] Configurable transition duration
 
 ### Per-layer color correction
-- [ ] Brightness / contrast / saturation per layer (real-time, composited inline)
-- [ ] Color temperature shift (warm/cool)
-- [ ] SIMD color correction (apply during blend pass to avoid extra full-frame pass)
-- [ ] Color LUT support (1D/3D LUT applied per layer)
-- [ ] White balance auto-correct (histogram-based, same approach as tazama `auto_color_correct`)
+
+> **Delegated to ranga**: All color correction is handled by `ranga::filter` (brightness, contrast, saturation, hue shift, color temperature, 3D LUT, vignette) and `ranga::histogram` (auto white balance). Aethersafta wires these into the per-layer pipeline.
+
+- [ ] Integrate `ranga::filter` into compositor layer pipeline
+- [ ] Per-layer filter parameter API (runtime-adjustable)
+- [ ] Apply filters during blend pass to avoid extra full-frame pass
 
 ### Scene switching API
 - [ ] Scene presets: named collections of layers + layout
@@ -129,7 +140,7 @@ Deferred to v0.6.0:
 
 ---
 
-## v0.8.0 — Streaming Output
+## v0.24.0 — Streaming Output
 
 ### RTMP output
 - [ ] RTMP client (connect to Twitch, YouTube, custom)
@@ -148,26 +159,29 @@ Deferred to v0.6.0:
 
 ---
 
-## v0.9.0 — Audio DSP & Performance
+## v0.25.0 — Audio DSP Integration & Latency
 
-### Audio DSP
-- [ ] Noise gate (silence detection, configurable threshold)
-- [ ] Compressor (dynamic range control)
-- [ ] Equalizer (parametric EQ, per-source)
-- [ ] Noise suppression (RNNoise or similar)
+### Audio DSP integration
+
+> **Delegated to dhvani**: All DSP effects live in `dhvani::dsp`. Aethersafta integrates them into the audio pipeline via `dhvani::graph`.
+
+- [ ] Integrate `dhvani::dsp` effects (compressor, parametric EQ, limiter) into per-source audio chain
+- [ ] Noise gate via dhvani compressor/limiter with threshold config
+- [ ] Noise suppression (RNNoise or similar — not yet in dhvani, may need new crate or dhvani feature)
 
 ### Latency tracking
 - [ ] Per-stage timing: capture → composite → encode → output
 - [ ] `LatencyBudget` with configurable target (e.g. 33ms for 30fps)
+- [ ] A/V sync via `dhvani::clock` PTS alignment
 - [ ] Alert when pipeline exceeds budget
 - [ ] Nazar integration for monitoring dashboard
 
 ### Performance
-- [ ] AVX2 alpha blending (4 pixels/iter, ~2× over current SSE2)
-- [ ] NEON alpha blending (aarch64)
 - [ ] Zero-copy frame path (compositor → encoder without memcpy)
-- [ ] GPU-accelerated compositing via Vulkan compute (optional)
+- [ ] GPU-accelerated compositing via wgpu compute (leverage `ranga` gpu feature)
 - [ ] Memory pool for frame buffers (eliminate per-frame allocation)
+
+> **Delegated to ranga**: AVX2/NEON alpha blending (`ranga::blend` with `simd` feature).
 
 ---
 
@@ -204,8 +218,8 @@ All of the following must be true before cutting 1.0:
 - [ ] Virtual background (ML-based segmentation via hoosh)
 - [ ] Face tracking auto-zoom
 - [ ] Color matching between layers (match camera A to camera B for multi-cam)
-- [ ] Blur/sharpen filter per layer
-- [ ] Vignette overlay effect
+
+> **Delegated to ranga**: Blur/sharpen (`ranga::filter`), vignette (`ranga::filter`).
 
 ### Platform support
 - [ ] macOS CoreMedia capture (alternative to wlr-screencopy)
@@ -226,3 +240,4 @@ All of the following must be true before cutting 1.0:
 - **Browser source** — embedding a browser engine for web overlays is out of scope. Use screenshot/image sources or external rendering.
 - **Audio-only DAW features** — audio mixing here is for stream/recording. Full DAW is Shruti's domain.
 - **Media playback** — that's Jalwa. Aethersafta can use a media file as a source, but is not a player.
+- **Reimplementing crate functionality** — color conversion, blending, DSP, encoding, and decoding belong in ranga/tarang/dhvani. Aethersafta orchestrates, not reimplements.

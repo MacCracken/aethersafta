@@ -1,25 +1,27 @@
 //! Aethersafta — Real-time media compositing engine.
 //!
 //! Multi-source capture, scene graph compositing, hardware-accelerated encoding,
-//! and streaming output. Built on [`tarang`] for encoding/muxing and
-//! [`ai_hwaccel`] for hardware encoder selection.
+//! and streaming output. Built on [`tarang`] for encoding/muxing,
+//! [`ranga`] for image processing, [`dhvani`] for audio capture/mixing/DSP,
+//! and [`ai_hwaccel`] for hardware encoder selection.
 //!
 //! # Architecture
 //!
 //! ```text
-//! Sources (screen, camera, media, image)
+//! Video Sources (screen, camera, media, image)
 //!     │
 //!     ▼
 //! Scene Graph (layers with z-order, transforms, opacity)
 //!     │
 //!     ▼
-//! Compositor (alpha blend, crop, scale → composited frame)
+//! Compositor (alpha blend, crop, scale → composited frame via ranga)
 //!     │
-//!     ▼
-//! Encode Pipeline (ai-hwaccel selects encoder → tarang encodes)
-//!     │
-//!     ▼
-//! Output Sinks (file, RTMP, SRT)
+//!     ▼                                    Audio Sources (PipeWire via dhvani)
+//! Encode Pipeline                              │
+//! (ai-hwaccel → tarang encodes)                ▼
+//!     │                                    AudioMixer (per-source DSP, mix, master bus)
+//!     ▼                                        │
+//! Output Sinks (file, RTMP, SRT) ◄─────────────┘
 //! ```
 //!
 //! # Quick start
@@ -36,12 +38,14 @@
 //! // scene.start(config)?;
 //! ```
 
+pub mod audio;
 pub mod encode;
 pub mod output;
 pub mod scene;
 pub mod source;
 pub mod timing;
 
+pub use audio::{AudioMixer, AudioMixerConfig, AudioSourceConfig, AudioSourceId};
 pub use encode::{EncodePipeline, EncoderConfig};
 pub use output::file::FileOutput;
 pub use output::{OutputConfig, OutputSink};
