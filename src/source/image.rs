@@ -27,15 +27,14 @@ impl ImageSource {
         let rgba = img.into_rgba8();
         let (width, height) = rgba.dimensions();
 
-        // Convert RGBA → ARGB (swap alpha to front)
+        // Convert RGBA → ARGB via ranga
         let pixels = rgba.into_raw();
-        let mut argb = Vec::with_capacity(pixels.len());
-        for chunk in pixels.chunks_exact(4) {
-            argb.push(chunk[3]); // A
-            argb.push(chunk[0]); // R
-            argb.push(chunk[1]); // G
-            argb.push(chunk[2]); // B
-        }
+        let rgba_buf =
+            ranga::pixel::PixelBuffer::new(pixels, width, height, ranga::pixel::PixelFormat::Rgba8)
+                .map_err(|e| anyhow::anyhow!("pixel buffer: {e}"))?;
+        let argb_buf = ranga::convert::rgba8_to_argb8(&rgba_buf)
+            .map_err(|e| anyhow::anyhow!("RGBA→ARGB: {e}"))?;
+        let argb = argb_buf.data;
 
         let name = path
             .file_name()

@@ -1,7 +1,7 @@
 //! Encoding pipeline: hardware selection via ai-hwaccel, encoding via tarang.
 //!
-//! Includes ARGB8888 → YUV420p color space conversion and software
-//! H.264 encoding via tarang's openh264 backend (behind `openh264-enc` feature).
+//! Uses ranga for ARGB8888 → YUV420p / NV12 color space conversion.
+//! Software H.264 encoding via tarang's openh264 backend (behind `openh264-enc` feature).
 
 use serde::{Deserialize, Serialize};
 
@@ -110,144 +110,48 @@ impl EncodePipeline {
     }
 }
 
-/// Convert an ARGB8888 buffer to YUV420p (planar Y, U, V).
+/// Convert an ARGB8888 buffer to YUV420p (planar Y, U, V) via ranga.
 ///
-/// Uses BT.601 coefficients with fixed-point integer math (no floats).
-/// Dimensions must be even.
+/// Converts ARGB→RGBA, then delegates to ranga's BT.601 fixed-point conversion.
 pub fn argb_to_yuv420p(argb: &[u8], width: u32, height: u32) -> Vec<u8> {
-    // BT.601 coefficients scaled by 256 (fixed-point Q8)
-    const YR: i32 = 77; // 0.299 * 256
-    const YG: i32 = 150; // 0.587 * 256
-    const YB: i32 = 29; // 0.114 * 256
-    const UR: i32 = -43; // -0.169 * 256
-    const UG: i32 = -85; // -0.331 * 256
-    const UB: i32 = 128; // 0.500 * 256
-    const VR: i32 = 128; // 0.500 * 256
-    const VG: i32 = -107; // -0.419 * 256
-    const VB: i32 = -21; // -0.081 * 256
-
-    let w = width as usize;
-    let h = height as usize;
-    let y_size = w * h;
-    let chroma_w = w / 2;
-    let chroma_h = h / 2;
-    let total = y_size + 2 * chroma_w * chroma_h;
-    let mut yuv = vec![0u8; total];
-
-    let (y_plane, chroma) = yuv.split_at_mut(y_size);
-    let (u_plane, v_plane) = chroma.split_at_mut(chroma_w * chroma_h);
-
-    for row in 0..h {
-        let row_offset = row * w;
-        let is_chroma_row = row % 2 == 0;
-
-        for col in 0..w {
-            let px = (row_offset + col) * 4;
-            // ARGB: [A, R, G, B]
-            let r = argb[px + 1] as i32;
-            let g = argb[px + 2] as i32;
-            let b = argb[px + 3] as i32;
-
-            // Y = (77*R + 150*G + 29*B) >> 8, clamped to [0, 255]
-            y_plane[row_offset + col] = ((YR * r + YG * g + YB * b) >> 8).clamp(0, 255) as u8;
-
-            // Subsample chroma 2x2 (top-left pixel of each block)
-            if is_chroma_row && col % 2 == 0 {
-                let ci = (row / 2) * chroma_w + (col / 2);
-                u_plane[ci] = ((UR * r + UG * g + UB * b + 128 * 256) >> 8).clamp(0, 255) as u8;
-                v_plane[ci] = ((VR * r + VG * g + VB * b + 128 * 256) >> 8).clamp(0, 255) as u8;
-            }
-        }
-    }
-
-    yuv
+    // Build a ranga PixelBuffer from ARGB data by converting to RGBA first
+    let argb_buf = ranga::pixel::PixelBuffer::new(
+        argb.to_vec(),
+        width,
+        height,
+        ranga::pixel::PixelFormat::Argb8,
+    )
+    .expect("ARGB buffer size mismatch");
+    let rgba_buf = ranga::convert::argb8_to_rgba8(&argb_buf).expect("ARGB→RGBA conversion");
+    let yuv_buf = ranga::convert::rgba_to_yuv420p(&rgba_buf).expect("RGBA→YUV420p conversion");
+    yuv_buf.data
 }
 
-/// Convert an NV12 buffer to ARGB8888.
-///
-/// NV12 layout: Y plane (w*h bytes) + interleaved UV plane (w * h/2 bytes).
-/// Uses BT.601 inverse with fixed-point integer math.
+/// Convert an NV12 buffer to ARGB8888 via ranga.
 pub fn nv12_to_argb(nv12: &[u8], width: u32, height: u32) -> Vec<u8> {
-    let w = width as usize;
-    let h = height as usize;
-    let y_size = w * h;
-    let mut argb = vec![0u8; w * h * 4];
-
-    let y_plane = &nv12[..y_size];
-    let uv_plane = &nv12[y_size..];
-
-    for row in 0..h {
-        for col in 0..w {
-            let y_val = y_plane[row * w + col] as i32;
-            let uv_idx = (row / 2) * w + (col & !1);
-            let u_val = uv_plane[uv_idx] as i32 - 128;
-            let v_val = uv_plane[uv_idx + 1] as i32 - 128;
-
-            // BT.601 inverse (fixed-point Q8):
-            // R = Y + 1.402*V  ≈ Y + (359*V >> 8)
-            // G = Y - 0.344*U - 0.714*V  ≈ Y - (88*U + 183*V) >> 8
-            // B = Y + 1.772*U  ≈ Y + (454*U >> 8)
-            let r = (y_val + ((359 * v_val) >> 8)).clamp(0, 255) as u8;
-            let g = (y_val - ((88 * u_val + 183 * v_val) >> 8)).clamp(0, 255) as u8;
-            let b = (y_val + ((454 * u_val) >> 8)).clamp(0, 255) as u8;
-
-            let out = (row * w + col) * 4;
-            argb[out] = 255; // A
-            argb[out + 1] = r;
-            argb[out + 2] = g;
-            argb[out + 3] = b;
-        }
-    }
-
-    argb
+    let nv12_buf = ranga::pixel::PixelBuffer::new(
+        nv12.to_vec(),
+        width,
+        height,
+        ranga::pixel::PixelFormat::Nv12,
+    )
+    .expect("NV12 buffer size mismatch");
+    let rgba_buf = ranga::convert::nv12_to_rgba(&nv12_buf).expect("NV12→RGBA conversion");
+    let argb_buf = ranga::convert::rgba8_to_argb8(&rgba_buf).expect("RGBA→ARGB conversion");
+    argb_buf.data
 }
 
-/// Convert an ARGB8888 buffer to NV12 (semi-planar YUV 4:2:0).
-///
-/// NV12 layout: Y plane (w*h) followed by interleaved UV pairs (w * h/2).
-/// Uses BT.601 coefficients with fixed-point integer math.
+/// Convert an ARGB8888 buffer to NV12 via ranga.
 pub fn argb_to_nv12(argb: &[u8], width: u32, height: u32) -> Vec<u8> {
-    const YR: i32 = 77;
-    const YG: i32 = 150;
-    const YB: i32 = 29;
-    const UR: i32 = -43;
-    const UG: i32 = -85;
-    const UB: i32 = 128;
-    const VR: i32 = 128;
-    const VG: i32 = -107;
-    const VB: i32 = -21;
-
-    let w = width as usize;
-    let h = height as usize;
-    let y_size = w * h;
-    let uv_size = w * (h / 2);
-    let mut nv12 = vec![0u8; y_size + uv_size];
-
-    let (y_plane, uv_plane) = nv12.split_at_mut(y_size);
-
-    for row in 0..h {
-        let row_offset = row * w;
-        let is_chroma_row = row % 2 == 0;
-
-        for col in 0..w {
-            let px = (row_offset + col) * 4;
-            let r = argb[px + 1] as i32;
-            let g = argb[px + 2] as i32;
-            let b = argb[px + 3] as i32;
-
-            y_plane[row_offset + col] = ((YR * r + YG * g + YB * b) >> 8).clamp(0, 255) as u8;
-
-            if is_chroma_row && col % 2 == 0 {
-                let uv_idx = (row / 2) * w + col;
-                uv_plane[uv_idx] =
-                    ((UR * r + UG * g + UB * b + 128 * 256) >> 8).clamp(0, 255) as u8;
-                uv_plane[uv_idx + 1] =
-                    ((VR * r + VG * g + VB * b + 128 * 256) >> 8).clamp(0, 255) as u8;
-            }
-        }
-    }
-
-    nv12
+    let argb_buf = ranga::pixel::PixelBuffer::new(
+        argb.to_vec(),
+        width,
+        height,
+        ranga::pixel::PixelFormat::Argb8,
+    )
+    .expect("ARGB buffer size mismatch");
+    let nv12_buf = ranga::convert::argb_to_nv12(&argb_buf).expect("ARGB→NV12 conversion");
+    nv12_buf.data
 }
 
 #[cfg(test)]
@@ -278,26 +182,21 @@ mod tests {
 
     #[test]
     fn argb_to_yuv_dimensions() {
-        // 4x4 black frame (ARGB: [255, 0, 0, 0])
         let mut argb = vec![0u8; 4 * 4 * 4];
         for chunk in argb.chunks_exact_mut(4) {
             chunk[0] = 255; // A
         }
         let yuv = argb_to_yuv420p(&argb, 4, 4);
-        // Y: 4*4=16, U: 2*2=4, V: 2*2=4 → total 24
         assert_eq!(yuv.len(), 24);
     }
 
     #[test]
     fn argb_white_to_yuv() {
-        // 2x2 white frame: ARGB [255, 255, 255, 255]
         let argb = vec![255u8; 2 * 2 * 4];
         let yuv = argb_to_yuv420p(&argb, 2, 2);
-        // White in BT.601: Y≈255, U≈128, V≈128
         for &y in &yuv[..4] {
             assert!(y > 250, "Y should be near 255, got {y}");
         }
-        // U and V should be near 128
         assert!((yuv[4] as i16 - 128).unsigned_abs() < 5);
         assert!((yuv[5] as i16 - 128).unsigned_abs() < 5);
     }
@@ -312,19 +211,17 @@ mod tests {
     fn argb_to_nv12_dimensions() {
         let mut argb = vec![0u8; 4 * 4 * 4];
         for chunk in argb.chunks_exact_mut(4) {
-            chunk[0] = 255; // A
+            chunk[0] = 255;
         }
         let nv12 = argb_to_nv12(&argb, 4, 4);
-        // Y: 4*4=16, UV: 4*2=8 → total 24
         assert_eq!(nv12.len(), 24);
     }
 
     #[test]
     fn nv12_to_argb_dimensions() {
-        let nv12 = vec![128u8; 4 * 4 + 4 * 2]; // 4x4 NV12
+        let nv12 = vec![128u8; 4 * 4 + 4 * 2];
         let argb = nv12_to_argb(&nv12, 4, 4);
         assert_eq!(argb.len(), 4 * 4 * 4);
-        // All pixels should be opaque
         for chunk in argb.chunks_exact(4) {
             assert_eq!(chunk[0], 255);
         }
@@ -332,7 +229,6 @@ mod tests {
 
     #[test]
     fn nv12_roundtrip_white() {
-        // White ARGB → NV12 → ARGB should stay close to white
         let argb = vec![255u8; 2 * 2 * 4];
         let nv12 = argb_to_nv12(&argb, 2, 2);
         let back = nv12_to_argb(&nv12, 2, 2);
@@ -346,7 +242,6 @@ mod tests {
 
     #[test]
     fn nv12_roundtrip_black() {
-        // Black ARGB [255, 0, 0, 0] → NV12 → ARGB
         let mut argb = vec![0u8; 2 * 2 * 4];
         for chunk in argb.chunks_exact_mut(4) {
             chunk[0] = 255;
