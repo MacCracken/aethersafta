@@ -54,10 +54,10 @@ clap = { version = "4", features = ["derive"] }
 image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
 
 # Image processing (color conversion, pixel format interchange)
-ranga = { version = "0.20.5", default-features = false }
+ranga = { version = "0.21.3", default-features = false }
 
 # Media encoding/muxing
-tarang = { path = "../tarang", default-features = false }
+tarang = { version = "0.20.3", default-features = false }
 
 # Hardware detection
 ai-hwaccel = { version = "0.20", optional = true, default-features = false }
