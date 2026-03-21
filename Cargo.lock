@@ -182,6 +182,26 @@ checksum = "72b3254f16251a8381aa12e40e3c4d2f0199f8c6508fbecb9d91f575e0fbb8c6"
 
 [[package]]
 name = "bindgen"
+version = "0.70.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f49d8fed880d473ea71efb9bf597651e77201bdd4893efe54c9e5d65ae04ce6f"
+dependencies = [
+ "bitflags 2.11.0",
+ "cexpr",
+ "clang-sys",
+ "itertools",
+ "log",
+ "prettyplease",
+ "proc-macro2",
+ "quote",
+ "regex",
+ "rustc-hash 1.1.0",
+ "shlex",
+ "syn",
+]
+
+[[package]]
+name = "bindgen"
 version = "0.72.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "993776b509cfb49c750f11b8f07a46fa23e0a1386ffc01fb1e7d343efc387895"
@@ -194,7 +214,7 @@ dependencies = [
  "proc-macro2",
  "quote",
  "regex",
- "rustc-hash",
+ "rustc-hash 2.1.1",
  "shlex",
  "syn",
 ]
@@ -481,6 +501,20 @@ checksum = "6b50826342786a51a89e2da3a28f1c32b06e387201bc2d19791f622c673706b1"
 dependencies = [
  "cast",
  "itertools",
+]
+
+[[package]]
+name = "cros-libva"
+version = "0.0.13"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d0d5dfcdd9b868cc52eb2b5f5b8dea053314b205073ab9f13fa118c479d3a161"
+dependencies = [
+ "bindgen 0.70.1",
+ "bitflags 2.11.0",
+ "log",
+ "pkg-config",
+ "regex",
+ "thiserror 1.0.69",
 ]
 
 [[package]]
@@ -1148,7 +1182,7 @@ version = "0.9.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "901049455d2eb6decf9058235d745237952f4804bc584c5fcb41412e6adcc6e0"
 dependencies = [
- "bindgen",
+ "bindgen 0.72.1",
  "cc",
  "system-deps",
 ]
@@ -1407,7 +1441,7 @@ version = "0.9.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cb028afee0d6ca17020b090e3b8fa2d7de23305aef975c7e5192a5050246ea36"
 dependencies = [
- "bindgen",
+ "bindgen 0.72.1",
  "libspa-sys",
  "system-deps",
 ]
@@ -1522,7 +1556,7 @@ dependencies = [
  "pin-project-lite",
  "quinn-proto",
  "quinn-udp",
- "rustc-hash",
+ "rustc-hash 2.1.1",
  "rustls",
  "socket2",
  "thiserror 2.0.18",
@@ -1543,7 +1577,7 @@ dependencies = [
  "lru-slab",
  "rand",
  "ring",
- "rustc-hash",
+ "rustc-hash 2.1.1",
  "rustls",
  "rustls-pki-types",
  "slab",
@@ -1730,6 +1764,12 @@ dependencies = [
  "untrusted",
  "windows-sys 0.52.0",
 ]
+
+[[package]]
+name = "rustc-hash"
+version = "1.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "08d43f7aa6b08d49f382cde6a7982047c3426db949b1424bc4b7ec9ae12c6ce2"
 
 [[package]]
 name = "rustc-hash"
@@ -2271,14 +2311,13 @@ dependencies = [
 
 [[package]]
 name = "tarang"
-version = "0.20.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5a0373222649618ef75694093ee4bbf81d8496a600d8b7a6f1ed25c2f81cad3f"
+version = "0.21.3"
 dependencies = [
  "anyhow",
  "bytes",
  "chrono",
  "clap",
+ "cros-libva",
  "image",
  "openh264",
  "reqwest",

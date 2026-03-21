@@ -46,8 +46,9 @@ pub mod source;
 pub mod timing;
 
 pub use audio::{AudioMixer, AudioMixerConfig, AudioSourceConfig, AudioSourceId};
-pub use encode::{EncodePipeline, EncoderConfig};
+pub use encode::{EncodePipeline, EncoderBackend, EncoderConfig};
 pub use output::file::FileOutput;
+pub use output::mp4::Mp4Output;
 pub use output::{OutputConfig, OutputSink};
 pub use scene::compositor::Compositor;
 pub use scene::{Layer, LayerId, SceneGraph};

@@ -1,8 +1,8 @@
 //! aethersafta CLI — record, preview, and stream composited scenes.
 //!
 //! Usage:
-//!   aethersafta record --source screen --output recording.mp4
-//!   aethersafta record --source image:path/to/bg.png --output recording.h264
+//!   aethersafta record --source screen --output recording.h264
+//!   aethersafta record --source image:bg.png --output recording.h264 --audio default
 //!   aethersafta preview --source screen
 //!   aethersafta info
 //!   aethersafta --version
@@ -13,6 +13,9 @@ use std::time::Instant;
 use clap::{Parser, Subcommand};
 use tracing::{error, info};
 
+use aethersafta::encode::{EncodePipeline, EncoderConfig, VideoCodec};
+use aethersafta::output::OutputSink;
+use aethersafta::output::file::FileOutput;
 use aethersafta::scene::compositor::Compositor;
 use aethersafta::scene::{Layer, LayerContent, SceneGraph};
 use aethersafta::source::Source;
@@ -57,6 +60,12 @@ enum Commands {
         /// Encoding bitrate in kbps
         #[arg(long, default_value = "6000")]
         bitrate: u32,
+        /// Audio source: "default", "none", or a PipeWire device ID
+        #[arg(long, default_value = "none")]
+        audio: String,
+        /// Audio gain in dB (0 = unity)
+        #[arg(long, default_value = "0")]
+        audio_gain: f32,
     },
     /// Preview composited output (display only, no recording)
     Preview {
@@ -93,8 +102,12 @@ fn main() {
             width,
             height,
             bitrate,
+            audio,
+            audio_gain,
         } => {
-            if let Err(e) = cmd_record(&source, &output, duration, fps, width, height, bitrate) {
+            if let Err(e) =
+                cmd_record(&source, &output, duration, fps, width, height, bitrate, &audio, audio_gain)
+            {
                 error!("{e:#}");
                 std::process::exit(1);
             }
@@ -116,24 +129,30 @@ fn cmd_info() {
     println!("aethersafta v{}", env!("CARGO_PKG_VERSION"));
     println!();
 
+    // Hardware accelerators
     #[cfg(feature = "hwaccel")]
     {
         let registry = ai_hwaccel::AcceleratorRegistry::detect();
-        println!("Hardware accelerators:");
-        for p in registry.all_profiles() {
-            let mem_gb = p.memory_bytes as f64 / (1024.0 * 1024.0 * 1024.0);
-            println!("  {} ({:.1} GB)", p.accelerator, mem_gb);
+        let profiles = registry.all_profiles();
+        if profiles.is_empty() {
+            println!("Hardware: no accelerators detected");
+        } else {
+            println!("Hardware:");
+            for p in profiles {
+                let mem_gb = p.memory_bytes as f64 / (1024.0 * 1024.0 * 1024.0);
+                println!("  {} ({:.1} GB)", p.accelerator, mem_gb);
+            }
         }
         println!();
     }
 
+    // Encoding
+    let best = aethersafta::encode::detect_best_encoder(VideoCodec::H264);
     println!("Encoding:");
-    #[cfg(feature = "openh264-enc")]
-    println!("  H.264 (openh264)");
-    #[cfg(not(feature = "openh264-enc"))]
-    println!("  (no encoders — build with --features openh264-enc)");
+    println!("  H.264: {best}");
     println!();
 
+    // Audio
     println!("Audio:");
     println!("  Mixer: dhvani (DSP, metering, mixing)");
     #[cfg(feature = "pipewire")]
@@ -151,8 +170,8 @@ fn cmd_info() {
                             _ => "??",
                         };
                         println!(
-                            "    [{kind}] {} ({}ch, {}Hz)",
-                            dev.name, dev.channels, dev.sample_rate
+                            "    [{kind}] {} (id={}, {}ch, {}Hz)",
+                            dev.name, dev.id, dev.channels, dev.sample_rate
                         );
                     }
                 }
@@ -232,6 +251,54 @@ fn parse_hex_color(hex: &str) -> anyhow::Result<[u8; 4]> {
     Ok([r, g, b, a])
 }
 
+/// Set up audio capture via dhvani PipeWire, if requested.
+///
+/// Returns the audio mixer and capture handle.
+#[cfg(feature = "pipewire")]
+fn setup_audio(
+    audio_arg: &str,
+    gain_db: f32,
+) -> anyhow::Result<
+    Option<(
+        aethersafta::audio::AudioMixer,
+        dhvani::capture::PwCapture,
+        aethersafta::audio::AudioSourceId,
+    )>,
+> {
+    if audio_arg == "none" {
+        return Ok(None);
+    }
+
+    let device_id = if audio_arg == "default" {
+        None
+    } else {
+        Some(audio_arg.parse::<u32>().map_err(|_| {
+            anyhow::anyhow!("--audio must be \"default\", \"none\", or a device ID (integer)")
+        })?)
+    };
+
+    let capture_config = dhvani::capture::CaptureConfig {
+        device_id,
+        ..Default::default()
+    };
+
+    let mut capture = dhvani::capture::PwCapture::new(capture_config)?;
+    capture.start()?;
+    info!(
+        "audio capture: PipeWire (device={}, 48kHz stereo)",
+        device_id.map_or("default".into(), |id| id.to_string())
+    );
+
+    let mut mixer = aethersafta::audio::AudioMixer::new(aethersafta::audio::AudioMixerConfig::default());
+    let mut src_config = aethersafta::audio::AudioSourceConfig::new("PipeWire Capture");
+    src_config.gain_db = gain_db;
+    src_config.device_id = device_id;
+    let src_id = mixer.add_source(src_config);
+
+    Ok(Some((mixer, capture, src_id)))
+}
+
+#[allow(clippy::too_many_arguments)]
 fn cmd_record(
     source_str: &str,
     output_path: &str,
@@ -239,7 +306,9 @@ fn cmd_record(
     fps: u32,
     width: u32,
     height: u32,
-    #[allow(unused_variables)] bitrate: u32,
+    bitrate: u32,
+    audio_arg: &str,
+    audio_gain: f32,
 ) -> anyhow::Result<()> {
     let (scene, source) = build_scene(source_str, width, height, fps)?;
     let compositor = Compositor::new(width, height);
@@ -254,78 +323,122 @@ fn cmd_record(
         n
     };
 
-    // Try H.264 encoding if available, otherwise write raw composited frames
-    #[cfg(feature = "openh264-enc")]
-    {
-        use aethersafta::encode::{EncodePipeline, EncoderConfig, VideoCodec};
-        use aethersafta::output::OutputSink;
-        use aethersafta::output::file::FileOutput;
+    // Init encoder (hw auto-detect via ai-hwaccel, sw fallback)
+    let mut encoder = EncodePipeline::new(EncoderConfig {
+        codec: VideoCodec::H264,
+        bitrate_kbps: bitrate,
+        ..Default::default()
+    });
+    encoder.init(width, height, fps)?;
+    info!("encoder: {} @ {bitrate} kbps", encoder.backend());
 
-        let mut encoder = EncodePipeline::new(EncoderConfig {
-            codec: VideoCodec::H264,
-            bitrate_kbps: bitrate,
-            ..Default::default()
-        });
-        encoder.init(width, height, fps)?;
-        let mut file_out = FileOutput::create(output_path)?;
+    // Use MP4 container for .mp4 files, raw bitstream otherwise
+    let is_mp4 = output_path.ends_with(".mp4");
+    let mut mp4_out = if is_mp4 {
+        Some(aethersafta::output::mp4::Mp4Output::create_video_only(
+            output_path,
+            tarang::core::VideoCodec::H264,
+            width,
+            height,
+        )?)
+    } else {
+        None
+    };
+    let mut file_out = if !is_mp4 {
+        Some(FileOutput::create(output_path)?)
+    } else {
+        None
+    };
+    if is_mp4 {
+        info!("output: MP4 container (via tarang muxer)");
+    }
 
-        info!("encoder: H.264 (openh264) @ {bitrate} kbps");
+    // Audio setup (PipeWire capture → mixer)
+    #[cfg(feature = "pipewire")]
+    let mut audio_state = setup_audio(audio_arg, audio_gain)?;
+    #[cfg(not(feature = "pipewire"))]
+    let audio_state: Option<()> = {
+        if audio_arg != "none" {
+            anyhow::bail!("audio capture requires --features pipewire");
+        }
+        None
+    };
 
-        let start = Instant::now();
-        for frame_num in 0..total_frames {
-            clock.tick();
+    let start = Instant::now();
+    for frame_num in 0..total_frames {
+        clock.tick();
 
-            let frames = capture_source_frames(&scene, &source);
+        // Video: capture → composite → encode → output
+        let frames = capture_source_frames(&scene, &source);
+        let composited = compositor.compose(&scene, &frames, clock.current_pts_us());
+        let packet = encoder.encode_frame(&composited)?;
+        if let Some(ref mut mp4) = mp4_out {
+            mp4.write_video(&packet)?;
+        } else if let Some(ref mut raw) = file_out {
+            raw.write_packet(&packet)?;
+        }
 
-            let composited = compositor.compose(&scene, &frames, clock.current_pts_us());
-            let packet = encoder.encode_frame(&composited)?;
-            file_out.write_packet(&packet)?;
+        // Audio: drain capture → mix (audio data is collected but not yet muxed
+        // into the output file — requires tarang container muxing, tracked in roadmap v0.22.0)
+        #[cfg(feature = "pipewire")]
+        if let Some((ref mut mixer, ref capture, src_id)) = audio_state {
+            let mut audio_buffers = HashMap::new();
+            // Drain all available audio buffers from PipeWire
+            while let Some(buf) = capture.try_recv() {
+                audio_buffers.insert(src_id, buf);
+            }
+            if !audio_buffers.is_empty() {
+                let _mixed = mixer.mix(&mut audio_buffers);
+                // TODO: mux audio into container via tarang::demux::Mp4Muxer
+            }
+        }
 
-            if (frame_num + 1) % (fps as u64) == 0 {
-                let elapsed = start.elapsed().as_secs_f64();
+        if (frame_num + 1) % (fps as u64) == 0 {
+            let elapsed = start.elapsed().as_secs_f64();
+            let bytes = mp4_out
+                .as_ref()
+                .map(|m| m.bytes_written())
+                .or_else(|| file_out.as_ref().map(|f| f.bytes_written()))
+                .unwrap_or(0);
+
+            #[cfg(feature = "pipewire")]
+            if let Some((ref mixer, _, _)) = audio_state {
+                let [l, r] = [mixer.master_peak_db(0), mixer.master_peak_db(1)];
                 info!(
-                    "frame {}: {:.1}s elapsed, {} bytes written",
-                    frame_num + 1,
-                    elapsed,
-                    file_out.bytes_written()
+                    "frame {}: {:.1}s, {} bytes, audio L={:.1}dB R={:.1}dB",
+                    frame_num + 1, elapsed, bytes, l, r,
                 );
+            } else {
+                info!("frame {}: {:.1}s, {} bytes", frame_num + 1, elapsed, bytes);
             }
+            #[cfg(not(feature = "pipewire"))]
+            info!("frame {}: {:.1}s, {} bytes", frame_num + 1, elapsed, bytes);
         }
-
-        file_out.close()?;
-        info!(
-            "done: {} frames, {} bytes written to {}",
-            encoder.frames_encoded(),
-            file_out.bytes_written(),
-            output_path
-        );
     }
 
-    #[cfg(not(feature = "openh264-enc"))]
-    {
-        use std::io::Write;
-
-        info!("no encoder available — writing raw composited ARGB frames");
-        let mut file = std::fs::File::create(output_path)?;
-        let start = Instant::now();
-
-        for frame_num in 0..total_frames {
-            clock.tick();
-
-            let frames = capture_source_frames(&scene, &source);
-
-            let composited = compositor.compose(&scene, &frames, clock.current_pts_us());
-            file.write_all(&composited.data)?;
-
-            if (frame_num + 1) % (fps as u64) == 0 {
-                let elapsed = start.elapsed().as_secs_f64();
-                info!("frame {}: {:.1}s elapsed", frame_num + 1, elapsed);
-            }
-        }
-
-        file.flush()?;
-        info!("done: raw frames written to {output_path}");
+    // Shut down audio capture
+    #[cfg(feature = "pipewire")]
+    if let Some((_, ref mut capture, _)) = audio_state {
+        let _ = capture.stop();
     }
+
+    // Finalize output
+    let total_bytes;
+    if let Some(ref mut mp4) = mp4_out {
+        mp4.finalize()?;
+        total_bytes = mp4.bytes_written();
+    } else if let Some(ref mut raw) = file_out {
+        raw.close()?;
+        total_bytes = raw.bytes_written();
+    } else {
+        total_bytes = 0;
+    }
+    info!(
+        "done: {} frames, {} bytes written to {}",
+        encoder.frames_encoded(),
+        total_bytes,
+        output_path
+    );
 
     Ok(())
 }

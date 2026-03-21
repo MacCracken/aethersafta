@@ -158,82 +158,60 @@ impl Compositor {
         let stride = self.width as usize * 4;
         let needs_scale = lw != fw || lh != fh;
 
-        if !needs_scale {
-            // 1:1 scale — row-level fast paths
-            for row in 0..clip.h {
-                let src_y = (clip.y0 + row) as i32 - clip.layer_y;
-                if src_y < 0 || src_y as u32 >= fh {
-                    continue;
-                }
-                let src_x0 = clip.x0 as i32 - clip.layer_x;
-                let src_row_start = (src_y as u32 * fw + src_x0 as u32) as usize * 4;
-                let src_row_end = src_row_start + clip.w as usize * 4;
-                if src_row_end > frame.data.len() {
-                    continue;
-                }
-                let src_row = &frame.data[src_row_start..src_row_end];
-                let dst_row_start = (clip.y0 + row) as usize * stride + clip.x0 as usize * 4;
-                let dst_row_end = dst_row_start + clip.w as usize * 4;
-                let dst_row = &mut buffer[dst_row_start..dst_row_end];
+        // If scaling is needed, pre-resize via ranga (bilinear) and blend the result.
+        // ranga::transform::resize requires Rgba8, so we convert ARGB→RGBA, resize, then RGBA→ARGB.
+        let scaled_data;
+        let (src_data, src_w, src_h) = if needs_scale {
+            let argb_buf = ranga::pixel::PixelBuffer::new(
+                frame.data.clone(),
+                fw,
+                fh,
+                ranga::pixel::PixelFormat::Argb8,
+            );
+            let Ok(argb_buf) = argb_buf else { return };
+            let Ok(rgba_buf) = ranga::convert::argb8_to_rgba8(&argb_buf) else {
+                return;
+            };
+            let Ok(resized) =
+                ranga::transform::resize(&rgba_buf, lw, lh, ranga::transform::ScaleFilter::Bilinear)
+            else {
+                return;
+            };
+            let Ok(back) = ranga::convert::rgba8_to_argb8(&resized) else {
+                return;
+            };
+            scaled_data = back.data;
+            (&scaled_data[..], lw, lh)
+        } else {
+            (&frame.data[..], fw, fh)
+        };
 
-                if opacity_fp >= 255 {
-                    // Full opacity: memcpy if all opaque, else per-pixel blend
-                    let all_opaque = src_row.chunks_exact(4).all(|px| px[0] == 255);
-                    if all_opaque {
-                        dst_row.copy_from_slice(src_row);
-                    } else {
-                        blend_row_alpha(dst_row, src_row, 256);
-                    }
-                } else {
-                    // Partial opacity: SIMD row blend
-                    blend_row_alpha(dst_row, src_row, opacity_fp);
-                }
-            }
-            return;
-        }
-
-        // Scaled: per-pixel general path
+        // 1:1 blend (original or pre-resized)
         for row in 0..clip.h {
-            let out_y = clip.y0 + row;
-            let local_y = out_y as i32 - clip.layer_y;
-            let src_y = (local_y as u64 * fh as u64 / lh as u64) as u32;
-            if src_y >= fh {
+            let src_y = (clip.y0 + row) as i32 - clip.layer_y;
+            if src_y < 0 || src_y as u32 >= src_h {
                 continue;
             }
-            let dst_row_start = out_y as usize * stride + clip.x0 as usize * 4;
+            let src_x0 = clip.x0 as i32 - clip.layer_x;
+            let src_row_start = (src_y as u32 * src_w + src_x0 as u32) as usize * 4;
+            let src_row_end = src_row_start + clip.w as usize * 4;
+            if src_row_end > src_data.len() {
+                continue;
+            }
+            let src_row = &src_data[src_row_start..src_row_end];
+            let dst_row_start = (clip.y0 + row) as usize * stride + clip.x0 as usize * 4;
+            let dst_row_end = dst_row_start + clip.w as usize * 4;
+            let dst_row = &mut buffer[dst_row_start..dst_row_end];
 
-            for col in 0..clip.w {
-                let local_x = (clip.x0 + col) as i32 - clip.layer_x;
-                let src_x = (local_x as u64 * fw as u64 / lw as u64) as u32;
-                if src_x >= fw {
-                    continue;
+            if opacity_fp >= 255 {
+                let all_opaque = src_row.chunks_exact(4).all(|px| px[0] == 255);
+                if all_opaque {
+                    dst_row.copy_from_slice(src_row);
+                } else {
+                    blend_row_alpha(dst_row, src_row, 256);
                 }
-
-                let src_idx = (src_y * fw + src_x) as usize * 4;
-                if src_idx + 3 >= frame.data.len() {
-                    continue;
-                }
-
-                let src_argb = [
-                    frame.data[src_idx],
-                    frame.data[src_idx + 1],
-                    frame.data[src_idx + 2],
-                    frame.data[src_idx + 3],
-                ];
-                let dst_idx = dst_row_start + col as usize * 4;
-                let dst_argb = [
-                    buffer[dst_idx],
-                    buffer[dst_idx + 1],
-                    buffer[dst_idx + 2],
-                    buffer[dst_idx + 3],
-                ];
-                let result = ranga::blend::blend_pixel_argb(
-                    src_argb,
-                    dst_argb,
-                    ranga::blend::BlendMode::Normal,
-                    opacity_fp.min(255) as u8,
-                );
-                buffer[dst_idx..dst_idx + 4].copy_from_slice(&result);
+            } else {
+                blend_row_alpha(dst_row, src_row, opacity_fp);
             }
         }
     }

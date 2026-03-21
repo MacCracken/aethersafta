@@ -1,6 +1,7 @@
 //! Output sinks: file recording, RTMP streaming, SRT streaming.
 
 pub mod file;
+pub mod mp4;
 
 use serde::{Deserialize, Serialize};
 
