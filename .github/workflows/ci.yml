@@ -67,6 +67,9 @@ jobs:
           - os: macos-latest
             target: aarch64-apple-darwin
             cargo-flags: "--no-default-features --features hwaccel,openh264-enc"
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            cargo-flags: "--no-default-features --features hwaccel,openh264-enc"
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -79,6 +82,9 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y libpipewire-0.3-dev
+      - name: Install NASM (Windows)
+        if: matrix.os == 'windows-latest'
+        run: choco install nasm -y
       - name: Run tests
         run: cargo test ${{ matrix.cargo-flags }}
       - name: Run doc tests
