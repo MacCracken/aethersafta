@@ -141,7 +141,7 @@ impl EncodePipeline {
             let has_gpu = registry
                 .all_profiles()
                 .iter()
-                .any(|p| matches!(p.family, ai_hwaccel::AcceleratorFamily::Gpu));
+                .any(|p| p.accelerator.is_gpu());
 
             if !has_gpu {
                 tracing::debug!("no GPU detected, skipping VA-API");
@@ -267,7 +267,7 @@ pub fn detect_best_encoder(codec: VideoCodec) -> EncoderBackend {
             let has_gpu = registry
                 .all_profiles()
                 .iter()
-                .any(|p| matches!(p.family, ai_hwaccel::AcceleratorFamily::Gpu));
+                .any(|p| p.accelerator.is_gpu());
             if has_gpu {
                 return EncoderBackend::Vaapi;
             }

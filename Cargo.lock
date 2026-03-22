@@ -506,8 +506,6 @@ dependencies = [
 [[package]]
 name = "cros-libva"
 version = "0.0.13"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d0d5dfcdd9b868cc52eb2b5f5b8dea053314b205073ab9f13fa118c479d3a161"
 dependencies = [
  "bindgen 0.70.1",
  "bitflags 2.11.0",
@@ -2311,9 +2309,9 @@ dependencies = [
 
 [[package]]
 name = "tarang"
-version = "0.20.3"
+version = "0.21.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5a0373222649618ef75694093ee4bbf81d8496a600d8b7a6f1ed25c2f81cad3f"
+checksum = "e913a8a894fe60e48ce284be2e602ef5bd37c9b53ebcd19c7014970fe6c06e7b"
 dependencies = [
  "anyhow",
  "bytes",
