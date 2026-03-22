@@ -145,4 +145,55 @@ mod tests {
         assert_eq!(RawFrame::expected_size(1920, 1080), 1920 * 1080 * 4);
         assert_eq!(RawFrame::expected_size(3840, 2160), 3840 * 2160 * 4);
     }
+
+    #[test]
+    fn raw_frame_1x1_argb() {
+        let frame = RawFrame {
+            data: vec![0u8; 4],
+            format: PixelFormat::Argb8888,
+            width: 1,
+            height: 1,
+            pts_us: 0,
+        };
+        assert!(frame.is_valid());
+        assert_eq!(RawFrame::expected_size(1, 1), 4);
+    }
+
+    #[test]
+    fn raw_frame_odd_dimensions_nv12() {
+        // For 3x3 NV12: Y plane = 3*3 = 9, UV plane = 3 * (3/2) = 3 * 1 = 3, total = 12
+        // Note: integer division floors, so the chroma plane height is 1 (not 2).
+        let size = RawFrame::expected_size_for(PixelFormat::Nv12, 3, 3);
+        assert_eq!(size, 9 + 3); // Y=3*3=9, UV=3*(3/2)=3
+        let frame = RawFrame {
+            data: vec![0u8; size],
+            format: PixelFormat::Nv12,
+            width: 3,
+            height: 3,
+            pts_us: 0,
+        };
+        assert!(frame.is_valid());
+    }
+
+    #[test]
+    fn source_config_serde_all_variants() {
+        let variants: Vec<SourceConfig> = vec![
+            SourceConfig::Screen { monitor: Some(0) },
+            SourceConfig::Camera { device: "/dev/video0".into() },
+            SourceConfig::MediaFile { path: "/tmp/test.mp4".into() },
+            SourceConfig::Image { path: "/tmp/bg.png".into() },
+        ];
+        for original in &variants {
+            let json = serde_json::to_string(original).expect("serialize");
+            let restored: SourceConfig = serde_json::from_str(&json).expect("deserialize");
+            let json2 = serde_json::to_string(&restored).expect("re-serialize");
+            assert_eq!(json, json2, "roundtrip failed for {json}");
+        }
+    }
+
+    #[test]
+    fn pixel_format_equality() {
+        assert_eq!(PixelFormat::Argb8888, PixelFormat::Argb8888);
+        assert_ne!(PixelFormat::Argb8888, PixelFormat::Nv12);
+    }
 }

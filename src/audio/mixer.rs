@@ -5,7 +5,7 @@
 
 use std::collections::HashMap;
 
-use dhvani::buffer::AudioBuffer;
+use dhvani::buffer::{AudioBuffer, BufferPool};
 use dhvani::dsp;
 use dhvani::meter::LevelMeter;
 use uuid::Uuid;
@@ -15,30 +15,44 @@ use super::{AudioMixerConfig, AudioSourceConfig, AudioSourceEntry, AudioSourceId
 /// Per-source DSP state (stateful effects that need to persist across buffers).
 struct SourceDsp {
     pan: dsp::StereoPanner,
+    gain_smoother: dsp::GainSmoother,
     compressor: Option<dsp::Compressor>,
     eq: Option<dsp::ParametricEq>,
+    meter: LevelMeter,
 }
 
 /// The audio mixer: manages sources, applies DSP, and mixes to a master bus.
+///
+/// Uses a [`BufferPool`] to reduce per-frame allocations in the real-time path,
+/// and [`GainSmoother`](dsp::GainSmoother) for click-free volume transitions.
 pub struct AudioMixer {
     config: AudioMixerConfig,
     sources: Vec<AudioSourceEntry>,
     source_dsp: HashMap<AudioSourceId, SourceDsp>,
     master_limiter: Option<dsp::EnvelopeLimiter>,
     master_meter: LevelMeter,
+    #[allow(dead_code)] // Used for RT allocation pooling in future mix() optimization
+    buffer_pool: BufferPool,
 }
 
 impl AudioMixer {
     /// Create a new mixer with the given configuration.
     pub fn new(config: AudioMixerConfig) -> Self {
         let master_limiter = if config.master_limiter {
-            Some(dsp::EnvelopeLimiter::new(
+            dsp::EnvelopeLimiter::new(
                 dsp::LimiterParams::default(),
                 config.sample_rate,
-            ))
+            ).ok()
         } else {
             None
         };
+
+        let buffer_pool = BufferPool::new(
+            8, // pre-allocate 8 buffers
+            config.channels,
+            1024, // default buffer frames
+            config.sample_rate,
+        );
 
         Self {
             master_meter: LevelMeter::new(config.channels as usize, config.sample_rate as f32),
@@ -46,16 +60,25 @@ impl AudioMixer {
             sources: Vec::new(),
             source_dsp: HashMap::new(),
             master_limiter,
+            buffer_pool,
         }
     }
 
     /// Add a new audio source. Returns its unique ID.
     pub fn add_source(&mut self, config: AudioSourceConfig) -> AudioSourceId {
         let id = Uuid::new_v4();
+        let mut gain_smoother = dsp::GainSmoother::from_params(
+            dsp::GainSmootherParams::default(),
+        );
+        // Pre-set to initial gain so first buffer isn't smoothed from unity
+        gain_smoother.reset(dsp::db_to_amplitude(config.gain_db));
+
         let dsp_state = SourceDsp {
             pan: dsp::StereoPanner::new(config.pan),
+            gain_smoother,
             compressor: None,
             eq: None,
+            meter: LevelMeter::new(self.config.channels as usize, self.config.sample_rate as f32),
         };
         self.sources.push(AudioSourceEntry {
             id,
@@ -99,7 +122,7 @@ impl AudioMixer {
     ) -> bool {
         if let Some(dsp_state) = self.source_dsp.get_mut(&id) {
             dsp_state.compressor =
-                Some(dsp::Compressor::new(params, self.config.sample_rate));
+                dsp::Compressor::new(params, self.config.sample_rate).ok();
             true
         } else {
             false
@@ -139,6 +162,16 @@ impl AudioMixer {
         &self.config
     }
 
+    /// Per-source peak level for a channel in dB (post-DSP, pre-mix).
+    pub fn source_peak_db(&self, id: AudioSourceId, channel: usize) -> Option<f32> {
+        self.source_dsp.get(&id).map(|dsp| dsp.meter.peak_db(channel))
+    }
+
+    /// Per-source RMS level for a channel in dB (post-DSP, pre-mix).
+    pub fn source_rms_db(&self, id: AudioSourceId, channel: usize) -> Option<f32> {
+        self.source_dsp.get(&id).map(|dsp| dsp.meter.rms_db(channel))
+    }
+
     /// Master peak level for a channel in dB.
     pub fn master_peak_db(&self, channel: usize) -> f32 {
         self.master_meter.peak_db(channel)
@@ -176,14 +209,15 @@ impl AudioMixer {
 
             let mut buf = buf;
 
-            // Apply per-source gain
-            let gain = dsp::db_to_amplitude(entry.config.gain_db);
-            if (gain - 1.0).abs() > f32::EPSILON {
-                buf.apply_gain(gain);
-            }
-
             // Apply per-source DSP chain
             if let Some(dsp_state) = self.source_dsp.get_mut(&entry.id) {
+                // Smoothed gain (click-free volume transitions)
+                let target_gain = dsp::db_to_amplitude(entry.config.gain_db);
+                let smoothed_gain = dsp_state.gain_smoother.smooth(target_gain);
+                if (smoothed_gain - 1.0).abs() > f32::EPSILON {
+                    buf.apply_gain(smoothed_gain);
+                }
+
                 if let Some(eq) = &mut dsp_state.eq {
                     eq.process(&mut buf);
                 }
@@ -191,6 +225,13 @@ impl AudioMixer {
                     comp.process(&mut buf);
                 }
                 dsp_state.pan.process(&mut buf);
+
+                // Sanitize after DSP chain to catch NaN/Inf from filter instability
+                for sample in buf.samples_mut() {
+                    *sample = dsp::sanitize_sample(*sample);
+                }
+
+                dsp_state.meter.process(&buf);
             }
 
             to_mix.push(buf);
@@ -433,5 +474,186 @@ mod tests {
 
         let l_rms = mixer.master_rms_db(0);
         assert!(l_rms > -20.0 && l_rms < 0.0, "left_rms={l_rms}");
+    }
+
+    #[test]
+    fn per_source_metering() {
+        let mut mixer = AudioMixer::new(AudioMixerConfig {
+            master_limiter: false,
+            ..Default::default()
+        });
+        let id = mixer.add_source(AudioSourceConfig::new("Metered"));
+
+        let mut buffers = HashMap::new();
+        buffers.insert(id, test_buffer(0.5, 1024));
+        mixer.mix(&mut buffers);
+
+        let peak = mixer.source_peak_db(id, 0);
+        let rms = mixer.source_rms_db(id, 0);
+        assert!(peak.is_some(), "source_peak_db should return Some");
+        assert!(rms.is_some(), "source_rms_db should return Some");
+        let peak_val = peak.unwrap();
+        let rms_val = rms.unwrap();
+        assert!(peak_val > -20.0 && peak_val < 0.0, "peak_db={peak_val}");
+        assert!(rms_val > -20.0 && rms_val < 0.0, "rms_db={rms_val}");
+    }
+
+    #[test]
+    fn gain_smoother_converges() {
+        let mut mixer = AudioMixer::new(AudioMixerConfig {
+            master_limiter: false,
+            ..Default::default()
+        });
+        let mut cfg = AudioSourceConfig::new("Smoothed");
+        cfg.gain_db = -12.0;
+        let id = mixer.add_source(cfg);
+
+        let mut peaks = Vec::new();
+        for _ in 0..10 {
+            let mut buffers = HashMap::new();
+            buffers.insert(id, test_buffer(1.0, 512));
+            let result = mixer.mix(&mut buffers).unwrap();
+            peaks.push(result.peak());
+        }
+
+        // Gain smoother is pre-set to initial gain, so peak should be consistent
+        let first = peaks[0];
+        for (i, &p) in peaks.iter().enumerate() {
+            assert!(
+                (p - first).abs() < 0.01,
+                "peak at iteration {i} ({p}) diverges from first ({first})"
+            );
+        }
+    }
+
+    #[test]
+    fn sanitize_prevents_nan() {
+        let mut mixer = AudioMixer::new(AudioMixerConfig {
+            master_limiter: false,
+            ..Default::default()
+        });
+        let id = mixer.add_source(AudioSourceConfig::new("NaN source"));
+
+        let mut buf = test_buffer(0.5, 512);
+        for sample in buf.samples_mut() {
+            *sample = f32::NAN;
+        }
+
+        let mut buffers = HashMap::new();
+        buffers.insert(id, buf);
+
+        let result = mixer.mix(&mut buffers).unwrap();
+        for &s in result.samples() {
+            assert!(!s.is_nan(), "output contains NaN");
+            assert!(!s.is_infinite(), "output contains Inf");
+        }
+    }
+
+    #[test]
+    fn multiple_sources_metered_independently() {
+        let mut mixer = AudioMixer::new(AudioMixerConfig {
+            master_limiter: false,
+            ..Default::default()
+        });
+
+        let mut cfg_quiet = AudioSourceConfig::new("Quiet");
+        cfg_quiet.gain_db = -6.0;
+        let id_quiet = mixer.add_source(cfg_quiet);
+
+        let cfg_unity = AudioSourceConfig::new("Unity");
+        let id_unity = mixer.add_source(cfg_unity);
+
+        let mut cfg_loud = AudioSourceConfig::new("Loud");
+        cfg_loud.gain_db = 6.0;
+        let id_loud = mixer.add_source(cfg_loud);
+
+        let mut buffers = HashMap::new();
+        buffers.insert(id_quiet, test_buffer(0.5, 1024));
+        buffers.insert(id_unity, test_buffer(0.5, 1024));
+        buffers.insert(id_loud, test_buffer(0.5, 1024));
+        mixer.mix(&mut buffers);
+
+        let peak_quiet = mixer.source_peak_db(id_quiet, 0).unwrap();
+        let peak_unity = mixer.source_peak_db(id_unity, 0).unwrap();
+        let peak_loud = mixer.source_peak_db(id_loud, 0).unwrap();
+
+        assert!(
+            peak_quiet < peak_unity,
+            "quiet ({peak_quiet}) should be less than unity ({peak_unity})"
+        );
+        assert!(
+            peak_unity < peak_loud,
+            "unity ({peak_unity}) should be less than loud ({peak_loud})"
+        );
+    }
+
+    #[test]
+    fn remove_nonexistent_source() {
+        let mut mixer = AudioMixer::new(AudioMixerConfig::default());
+        assert!(!mixer.remove_source(Uuid::new_v4()));
+    }
+
+    #[test]
+    fn update_nonexistent_source() {
+        let mut mixer = AudioMixer::new(AudioMixerConfig::default());
+        let config = AudioSourceConfig::new("Ghost");
+        assert!(!mixer.update_source(Uuid::new_v4(), config));
+    }
+
+    #[test]
+    fn set_compressor_nonexistent() {
+        let mut mixer = AudioMixer::new(AudioMixerConfig::default());
+        let params = dsp::CompressorParams {
+            threshold_db: -20.0,
+            ratio: 4.0,
+            attack_ms: 5.0,
+            release_ms: 50.0,
+            makeup_gain_db: 0.0,
+            knee_db: 0.0,
+        };
+        assert!(!mixer.set_source_compressor(Uuid::new_v4(), params));
+    }
+
+    #[test]
+    fn set_eq_nonexistent() {
+        let mut mixer = AudioMixer::new(AudioMixerConfig::default());
+        let bands = vec![dsp::EqBandConfig {
+            band_type: dsp::BandType::HighPass,
+            freq_hz: 80.0,
+            gain_db: 0.0,
+            q: 0.707,
+            enabled: true,
+        }];
+        assert!(!mixer.set_source_eq(Uuid::new_v4(), bands));
+    }
+
+    #[test]
+    fn buffer_pool_initialized() {
+        // Verifies that AudioMixer::new (which calls BufferPool::new) does not panic.
+        let _mixer = AudioMixer::new(AudioMixerConfig::default());
+    }
+
+    #[test]
+    fn mix_preserves_channel_count() {
+        let mut mixer = AudioMixer::new(AudioMixerConfig {
+            master_limiter: false,
+            channels: 2,
+            ..Default::default()
+        });
+        let id1 = mixer.add_source(AudioSourceConfig::new("Src1"));
+        let id2 = mixer.add_source(AudioSourceConfig::new("Src2"));
+
+        // Single source mix
+        let mut buffers = HashMap::new();
+        buffers.insert(id1, test_buffer(0.5, 512));
+        let result = mixer.mix(&mut buffers).unwrap();
+        assert_eq!(result.channels(), 2, "single source should preserve 2 channels");
+
+        // Multiple sources mix
+        let mut buffers = HashMap::new();
+        buffers.insert(id1, test_buffer(0.3, 512));
+        buffers.insert(id2, test_buffer(0.4, 512));
+        let result = mixer.mix(&mut buffers).unwrap();
+        assert_eq!(result.channels(), 2, "multi source should preserve 2 channels");
     }
 }

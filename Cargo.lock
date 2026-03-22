@@ -44,9 +44,9 @@ dependencies = [
 
 [[package]]
 name = "ai-hwaccel"
-version = "0.20.3"
+version = "0.21.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "da8db15e7c0b66da2ee1dede56c1b260b5b0badc43bf550691ce2dc3b02a75c6"
+checksum = "6cf22beab2a92f753d3f02c3341d063729c115deeb29965152e6ebd3a62debb6"
 dependencies = [
  "serde",
  "serde_json",
@@ -550,9 +550,9 @@ checksum = "460fbee9c2c2f33933d720630a6a0bac33ba7053db5344fac858d4b8952d77d5"
 
 [[package]]
 name = "dhvani"
-version = "0.20.5"
+version = "0.21.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "26acd5f31a50240ee5d4479ffc8d306f7f9f4ec01cc15f10b4ffb3ff9ec3bdd9"
+checksum = "8aa3c37adb58f044dd1fb56feeb59dcc13fcbe6b29f7397d5c01c3a7344504f1"
 dependencies = [
  "pipewire",
  "serde",
@@ -1653,9 +1653,9 @@ dependencies = [
 
 [[package]]
 name = "ranga"
-version = "0.20.5"
+version = "0.21.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9d656f63a1f4bc9b72630b3c4e7634b3887ce7cf3de2d6f3da67cf234796d7a7"
+checksum = "795e7e4dc0e7d12b923cc2bc8b0043e5b9c2c15daf62aa8cd5639f9d515e3301"
 dependencies = [
  "serde",
  "serde_json",
@@ -2311,7 +2311,9 @@ dependencies = [
 
 [[package]]
 name = "tarang"
-version = "0.21.3"
+version = "0.20.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5a0373222649618ef75694093ee4bbf81d8496a600d8b7a6f1ed25c2f81cad3f"
 dependencies = [
  "anyhow",
  "bytes",

@@ -6,20 +6,34 @@
 //! - DSP effects via [`dhvani::dsp`]
 //! - Metering via [`dhvani::meter`]
 //! - A/V sync via [`dhvani::clock`]
+//! - Graph-based routing via [`dhvani::graph`]
 //!
 //! # Architecture
 //!
+//! The audio pipeline supports two modes:
+//!
+//! **Manual mixer** ([`AudioMixer`]): Simple per-source DSP → mix → master chain.
+//! Good for basic use cases with a fixed number of sources.
+//!
+//! **Graph pipeline** ([`AudioPipeline`]): Node-based routing via [`dhvani::graph`].
+//! Supports dynamic source add/remove with real-time safe graph swaps.
+//!
 //! ```text
-//! PipeWire ──► AudioSource(s) ──► per-source DSP ──► AudioMixer ──► master DSP ──► output
-//!                                   (gain, EQ,        (dhvani::     (compressor,
-//!                                    compressor)       buffer::mix)  limiter)
+//! PipeWire ──► AudioCaptureManager ──► per-source DSP ──► Mixer ──► master DSP ──► output
+//!              (multi-device)           (gain, EQ,         (graph     (compressor,
+//!                                        compressor)       node)      limiter)
 //! ```
 
+pub mod capture;
+pub mod graph;
 pub mod mixer;
 
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+#[cfg(feature = "pipewire")]
+pub use capture::AudioCaptureManager;
+pub use graph::AudioPipeline;
 pub use mixer::AudioMixer;
 
 /// Unique identifier for an audio source.

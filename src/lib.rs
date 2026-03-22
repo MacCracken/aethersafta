@@ -45,7 +45,9 @@ pub mod scene;
 pub mod source;
 pub mod timing;
 
-pub use audio::{AudioMixer, AudioMixerConfig, AudioSourceConfig, AudioSourceId};
+#[cfg(feature = "pipewire")]
+pub use audio::AudioCaptureManager;
+pub use audio::{AudioMixer, AudioMixerConfig, AudioPipeline, AudioSourceConfig, AudioSourceId};
 pub use encode::{EncodePipeline, EncoderBackend, EncoderConfig};
 pub use output::file::FileOutput;
 pub use output::mp4::Mp4Output;

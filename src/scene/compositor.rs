@@ -173,7 +173,7 @@ impl Compositor {
                 return;
             };
             let Ok(resized) =
-                ranga::transform::resize(&rgba_buf, lw, lh, ranga::transform::ScaleFilter::Bilinear)
+                ranga::transform::resize(&rgba_buf, lw, lh, ranga::transform::ScaleFilter::Bicubic)
             else {
                 return;
             };
@@ -437,5 +437,226 @@ mod tests {
             assert!(chunk[0] > 190, "A={}", chunk[0]);
             assert!(chunk[1] > 190, "R={}", chunk[1]);
         }
+    }
+
+    #[test]
+    fn scaled_layer_composited() {
+        let comp = Compositor::new(8, 8);
+        let mut scene = SceneGraph::new(8, 8, 30);
+        let mut layer = Layer::new(
+            "scaled",
+            LayerContent::Source {
+                source_id: uuid::Uuid::nil(),
+            },
+        );
+        layer.size = Some((4, 4));
+        let lid = layer.id;
+        scene.add_layer(layer);
+
+        // 8x8 opaque white source frame
+        let src_frame = RawFrame {
+            data: vec![255u8; 8 * 8 * 4],
+            format: PixelFormat::Argb8888,
+            width: 8,
+            height: 8,
+            pts_us: 0,
+        };
+        let mut frames = HashMap::new();
+        frames.insert(lid, src_frame);
+
+        let result = comp.compose(&scene, &frames, 0);
+        assert!(result.is_valid());
+        assert_eq!(result.width, 8);
+        assert_eq!(result.height, 8);
+        // The 4x4 region should have non-zero pixels from the bicubic-resized source
+        let idx_inside = (8 + 1) * 4; // pixel (1,1) inside 4x4 region
+        assert!(result.data[idx_inside] > 0, "scaled region should have content");
+        // Pixel outside the 4x4 layer should be untouched (transparent black)
+        let idx_outside = (5 * 8 + 5) * 4; // pixel (5,5) outside layer
+        assert_eq!(result.data[idx_outside], 0, "outside layer should be transparent");
+    }
+
+    #[test]
+    fn multiple_layers_stacked() {
+        let comp = Compositor::new(8, 8);
+        let mut scene = SceneGraph::new(8, 8, 30);
+
+        // Bottom: full-canvas blue (z=0)
+        let mut blue = Layer::new(
+            "blue",
+            LayerContent::ColorFill {
+                color: [0, 0, 255, 255],
+            },
+        );
+        blue.z_index = 0;
+        scene.add_layer(blue);
+
+        // Middle: 6x6 green centered at (1,1) (z=1)
+        let mut green = Layer::new(
+            "green",
+            LayerContent::ColorFill {
+                color: [0, 255, 0, 255],
+            },
+        );
+        green.z_index = 1;
+        green.size = Some((6, 6));
+        green.position = (1, 1);
+        scene.add_layer(green);
+
+        // Top: 2x2 red centered at (3,3) (z=2)
+        let mut red = Layer::new(
+            "red",
+            LayerContent::ColorFill {
+                color: [255, 0, 0, 255],
+            },
+        );
+        red.z_index = 2;
+        red.size = Some((2, 2));
+        red.position = (3, 3);
+        scene.add_layer(red);
+
+        let frame = comp.compose(&scene, &HashMap::new(), 0);
+        assert!(frame.is_valid());
+
+        // Corner (0,0) should be blue: [A=255, R=0, G=0, B=255]
+        assert_eq!(&frame.data[0..4], [255, 0, 0, 255]);
+        // Center (3,3) should be red: [A=255, R=255, G=0, B=0]
+        let center = (3 * 8 + 3) * 4;
+        assert_eq!(&frame.data[center..center + 4], [255, 255, 0, 0]);
+        // (2,2) should be green: [A=255, R=0, G=255, B=0]
+        let mid = (2 * 8 + 2) * 4;
+        assert_eq!(&frame.data[mid..mid + 4], [255, 0, 255, 0]);
+    }
+
+    #[test]
+    fn fully_transparent_layer_noop() {
+        let comp = Compositor::new(4, 4);
+        let mut scene = SceneGraph::new(4, 4, 30);
+        let mut layer = Layer::new(
+            "ghost",
+            LayerContent::ColorFill {
+                color: [255, 0, 0, 255],
+            },
+        );
+        layer.opacity = 0.0;
+        scene.add_layer(layer);
+
+        let frame = comp.compose(&scene, &HashMap::new(), 0);
+        assert!(frame.data.iter().all(|&b| b == 0), "transparent layer should not affect output");
+    }
+
+    #[test]
+    fn layer_outside_bounds() {
+        let comp = Compositor::new(4, 4);
+        let mut scene = SceneGraph::new(4, 4, 30);
+        let mut layer = Layer::new(
+            "offscreen",
+            LayerContent::ColorFill {
+                color: [255, 0, 0, 255],
+            },
+        );
+        layer.size = Some((2, 2));
+        layer.position = (1000, 1000);
+        scene.add_layer(layer);
+
+        let frame = comp.compose(&scene, &HashMap::new(), 0);
+        assert!(frame.data.iter().all(|&b| b == 0), "off-canvas layer should produce no change");
+    }
+
+    #[test]
+    fn single_pixel_frame() {
+        let comp = Compositor::new(1, 1);
+        let mut scene = SceneGraph::new(1, 1, 30);
+        let layer = Layer::new(
+            "px",
+            LayerContent::Source {
+                source_id: uuid::Uuid::nil(),
+            },
+        );
+        let lid = layer.id;
+        scene.add_layer(layer);
+
+        // Single pixel: ARGB = [255, 128, 64, 32]
+        let src_frame = RawFrame {
+            data: vec![255, 128, 64, 32],
+            format: PixelFormat::Argb8888,
+            width: 1,
+            height: 1,
+            pts_us: 0,
+        };
+        let mut frames = HashMap::new();
+        frames.insert(lid, src_frame);
+
+        let result = comp.compose(&scene, &frames, 0);
+        assert!(result.is_valid());
+        assert_eq!(result.width, 1);
+        assert_eq!(result.height, 1);
+        assert_eq!(&result.data[..], &[255, 128, 64, 32]);
+    }
+
+    #[test]
+    fn large_canvas_color_fill() {
+        let comp = Compositor::new(1920, 1080);
+        let mut scene = SceneGraph::new(1920, 1080, 30);
+        scene.add_layer(Layer::new(
+            "fill",
+            LayerContent::ColorFill {
+                color: [0, 128, 255, 255],
+            },
+        ));
+
+        let frame = comp.compose(&scene, &HashMap::new(), 0);
+        assert!(frame.is_valid());
+        assert_eq!(frame.width, 1920);
+        assert_eq!(frame.height, 1080);
+
+        // First pixel: [A=255, R=0, G=128, B=255]
+        assert_eq!(&frame.data[0..4], [255, 0, 128, 255]);
+        // Last pixel
+        let last = frame.data.len() - 4;
+        assert_eq!(&frame.data[last..last + 4], [255, 0, 128, 255]);
+    }
+
+    #[test]
+    fn overlapping_semi_transparent() {
+        let comp = Compositor::new(1, 1);
+        let mut scene = SceneGraph::new(1, 1, 30);
+
+        // Bottom: 50% red
+        let mut red = Layer::new(
+            "red",
+            LayerContent::ColorFill {
+                color: [255, 0, 0, 255],
+            },
+        );
+        red.opacity = 0.5;
+        red.z_index = 0;
+        scene.add_layer(red);
+
+        // Top: 50% blue
+        let mut blue = Layer::new(
+            "blue",
+            LayerContent::ColorFill {
+                color: [0, 0, 255, 255],
+            },
+        );
+        blue.opacity = 0.5;
+        blue.z_index = 1;
+        scene.add_layer(blue);
+
+        let frame = comp.compose(&scene, &HashMap::new(), 0);
+        assert!(frame.is_valid());
+
+        let a = frame.data[0];
+        let r = frame.data[1];
+        let g = frame.data[2];
+        let b = frame.data[3];
+
+        // Should have some red and some blue, green should be near zero
+        assert!(r > 30, "expected red component, got R={}", r);
+        assert!(b > 30, "expected blue component, got B={}", b);
+        assert!(g < 10, "green should be near zero, got G={}", g);
+        // Alpha should be non-trivial from blending
+        assert!(a > 80, "expected meaningful alpha, got A={}", a);
     }
 }

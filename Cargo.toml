@@ -54,16 +54,16 @@ clap = { version = "4", features = ["derive"] }
 image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
 
 # Image processing (color conversion, pixel format interchange)
-ranga = { version = "0.21.3", default-features = false }
+ranga = { version = "0.21.4", default-features = false }
 
 # Media encoding/muxing
 tarang = { version = "0.20.3", default-features = false }
 
 # Hardware detection
-ai-hwaccel = { version = "0.20", optional = true, default-features = false }
+ai-hwaccel = { version = "0.21.3", optional = true, default-features = false }
 
 # Audio capture, mixing, DSP, metering
-dhvani = { version = "0.20", default-features = false, features = ["dsp", "graph"] }
+dhvani = { version = "0.21.4", default-features = false, features = ["dsp", "graph"] }
 
 [dev-dependencies]
 tempfile = "3"
@@ -76,4 +76,12 @@ harness = false
 
 [[bench]]
 name = "encode"
+harness = false
+
+[[bench]]
+name = "audio"
+harness = false
+
+[[bench]]
+name = "convert"
 harness = false

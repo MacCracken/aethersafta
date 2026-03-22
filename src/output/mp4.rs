@@ -33,7 +33,14 @@ impl Mp4Output {
             width,
             height,
         };
-        let mut muxer = Mp4Muxer::new_video_only(file, video_config);
+        // tarang 0.20.3 requires audio config; use dummy config for video-only.
+        let audio_config = MuxConfig {
+            codec: tarang::core::AudioCodec::Aac,
+            sample_rate: 48000,
+            channels: 2,
+            bits_per_sample: 16,
+        };
+        let mut muxer = Mp4Muxer::new_with_video(file, audio_config, video_config);
         muxer.write_header()?;
 
         Ok(Self {

@@ -132,7 +132,9 @@ fn cmd_info() {
     // Hardware accelerators
     #[cfg(feature = "hwaccel")]
     {
-        let registry = ai_hwaccel::AcceleratorRegistry::detect();
+        let registry = ai_hwaccel::DiskCachedRegistry::new(
+            std::time::Duration::from_secs(60),
+        ).get();
         let profiles = registry.all_profiles();
         if profiles.is_empty() {
             println!("Hardware: no accelerators detected");
@@ -253,7 +255,8 @@ fn parse_hex_color(hex: &str) -> anyhow::Result<[u8; 4]> {
 
 /// Set up audio capture via dhvani PipeWire, if requested.
 ///
-/// Returns the audio mixer and capture handle.
+/// Returns the audio mixer, capture manager, and source ID.
+/// Supports multiple audio sources via `AudioCaptureManager`.
 #[cfg(feature = "pipewire")]
 fn setup_audio(
     audio_arg: &str,
@@ -261,7 +264,7 @@ fn setup_audio(
 ) -> anyhow::Result<
     Option<(
         aethersafta::audio::AudioMixer,
-        dhvani::capture::PwCapture,
+        aethersafta::audio::AudioCaptureManager,
         aethersafta::audio::AudioSourceId,
     )>,
 > {
@@ -277,25 +280,21 @@ fn setup_audio(
         })?)
     };
 
-    let capture_config = dhvani::capture::CaptureConfig {
-        device_id,
-        ..Default::default()
-    };
+    let mut mixer = aethersafta::audio::AudioMixer::new(aethersafta::audio::AudioMixerConfig::default());
+    let mut src_config = aethersafta::audio::AudioSourceConfig::new("PipeWire Capture");
+    src_config.gain_db = gain_db;
+    src_config.device_id = device_id;
+    let src_id = mixer.add_source(src_config.clone());
 
-    let mut capture = dhvani::capture::PwCapture::new(capture_config)?;
-    capture.start()?;
+    let mut capture_mgr = aethersafta::audio::AudioCaptureManager::new();
+    capture_mgr.add_source(src_id, src_config)?;
+
     info!(
         "audio capture: PipeWire (device={}, 48kHz stereo)",
         device_id.map_or("default".into(), |id| id.to_string())
     );
 
-    let mut mixer = aethersafta::audio::AudioMixer::new(aethersafta::audio::AudioMixerConfig::default());
-    let mut src_config = aethersafta::audio::AudioSourceConfig::new("PipeWire Capture");
-    src_config.gain_db = gain_db;
-    src_config.device_id = device_id;
-    let src_id = mixer.add_source(src_config);
-
-    Ok(Some((mixer, capture, src_id)))
+    Ok(Some((mixer, capture_mgr, src_id)))
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -381,12 +380,8 @@ fn cmd_record(
         // Audio: drain capture → mix (audio data is collected but not yet muxed
         // into the output file — requires tarang container muxing, tracked in roadmap v0.22.0)
         #[cfg(feature = "pipewire")]
-        if let Some((ref mut mixer, ref capture, src_id)) = audio_state {
-            let mut audio_buffers = HashMap::new();
-            // Drain all available audio buffers from PipeWire
-            while let Some(buf) = capture.try_recv() {
-                audio_buffers.insert(src_id, buf);
-            }
+        if let Some((ref mut mixer, ref capture_mgr, _)) = audio_state {
+            let mut audio_buffers = capture_mgr.drain_buffers();
             if !audio_buffers.is_empty() {
                 let _mixed = mixer.mix(&mut audio_buffers);
                 // TODO: mux audio into container via tarang::demux::Mp4Muxer
@@ -418,8 +413,8 @@ fn cmd_record(
 
     // Shut down audio capture
     #[cfg(feature = "pipewire")]
-    if let Some((_, ref mut capture, _)) = audio_state {
-        let _ = capture.stop();
+    if let Some((_, ref mut capture_mgr, _)) = audio_state {
+        capture_mgr.stop_all();
     }
 
     // Finalize output

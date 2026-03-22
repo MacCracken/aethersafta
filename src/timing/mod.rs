@@ -170,4 +170,46 @@ mod tests {
         // Two frames at 30fps: ~66.6ms difference
         assert!((pts2 - pts1) > 33000);
     }
+
+    #[test]
+    fn frame_clock_60fps() {
+        let mut clock = FrameClock::new(60);
+        for _ in 0..60 {
+            clock.tick();
+        }
+        let pts = clock.current_pts_us();
+        assert!(
+            (950_000..=1_050_000).contains(&pts),
+            "Expected PTS ~1s after 60 ticks at 60fps, got {pts} us"
+        );
+    }
+
+    #[test]
+    fn frame_clock_is_behind() {
+        let mut clock = FrameClock::new(60);
+        // Before any tick, is_behind should be false (no start_time).
+        assert!(!clock.is_behind());
+        // After a single tick the clock just started, should not be behind.
+        clock.tick();
+        assert!(!clock.is_behind());
+    }
+
+    #[test]
+    fn latency_budget_zero_stages() {
+        let budget = LatencyBudget::new(Duration::from_millis(33));
+        assert!(budget.within_budget());
+        assert_eq!(budget.headroom_us(), budget.target.as_micros() as i64);
+    }
+
+    #[test]
+    fn latency_budget_exact() {
+        let mut budget = LatencyBudget::new(Duration::from_micros(33333));
+        budget.capture_us = 10000;
+        budget.composite_us = 8333;
+        budget.encode_us = 10000;
+        budget.output_us = 5000;
+        assert_eq!(budget.total_us(), 33333);
+        assert!(budget.within_budget());
+        assert_eq!(budget.headroom_us(), 0);
+    }
 }

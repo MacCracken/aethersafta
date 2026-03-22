@@ -134,7 +134,11 @@ impl EncodePipeline {
                 return None;
             }
 
-            let registry = ai_hwaccel::AcceleratorRegistry::detect();
+            // Use disk-cached registry to avoid re-probing hardware every run.
+            // Cache persists to $XDG_CACHE_HOME/ai-hwaccel/registry.json with 60s TTL.
+            let registry = ai_hwaccel::DiskCachedRegistry::new(
+                std::time::Duration::from_secs(60),
+            ).get();
             let has_gpu = registry.all_profiles().iter().any(|p| {
                 matches!(
                     p.family,
@@ -254,7 +258,9 @@ pub fn detect_best_encoder(codec: VideoCodec) -> EncoderBackend {
     #[cfg(all(feature = "hwaccel", feature = "vaapi"))]
     {
         if codec == VideoCodec::H264 {
-            let registry = ai_hwaccel::AcceleratorRegistry::detect();
+            let registry = ai_hwaccel::DiskCachedRegistry::new(
+                std::time::Duration::from_secs(60),
+            ).get();
             let has_gpu = registry
                 .all_profiles()
                 .iter()
@@ -298,7 +304,8 @@ fn make_packet(data: Vec<u8>, pts_us: u64, frames_encoded: u64, keyframe_interva
 
 /// Convert an ARGB8888 buffer to YUV420p (planar Y, U, V) via ranga.
 ///
-/// Converts ARGB→RGBA, then delegates to ranga's BT.601 fixed-point conversion.
+/// Converts ARGB→RGBA, then delegates to ranga's BT.709 fixed-point conversion
+/// (correct for HD video, H.264 assumes BT.709 for >= 720p).
 pub fn argb_to_yuv420p(argb: &[u8], width: u32, height: u32) -> Vec<u8> {
     let argb_buf = ranga::pixel::PixelBuffer::new(
         argb.to_vec(),
@@ -308,7 +315,7 @@ pub fn argb_to_yuv420p(argb: &[u8], width: u32, height: u32) -> Vec<u8> {
     )
     .expect("ARGB buffer size mismatch");
     let rgba_buf = ranga::convert::argb8_to_rgba8(&argb_buf).expect("ARGB→RGBA conversion");
-    let yuv_buf = ranga::convert::rgba_to_yuv420p(&rgba_buf).expect("RGBA→YUV420p conversion");
+    let yuv_buf = ranga::convert::rgba_to_yuv420p_bt709(&rgba_buf).expect("RGBA→YUV420p BT.709 conversion");
     yuv_buf.data
 }
 

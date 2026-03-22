@@ -8,12 +8,12 @@ Completed items are in [CHANGELOG.md](../../CHANGELOG.md).
 
 Aethersafta delegates low-level media work to sibling crates:
 
-| Crate | Role | Key modules used |
-|-------|------|-----------------|
-| [ranga](https://crates.io/crates/ranga) | Image processing, color conversion, blending, filters | `blend`, `convert`, `filter`, `transform`, `composite`, `histogram` |
-| [tarang](https://crates.io/crates/tarang) | Media encoding/decoding, container muxing/demuxing | `audio`, `video`, `demux`, `core` |
-| [dhvani](https://crates.io/crates/dhvani) | Audio DSP, capture, mixing, metering, MIDI | `dsp`, `capture`, `buffer`, `clock`, `meter`, `graph` |
-| [ai-hwaccel](https://crates.io/crates/ai-hwaccel) | Hardware accelerator detection | encoder selection, fallback logic |
+| Crate | Version | Role | Key modules used |
+|-------|---------|------|-----------------|
+| [ranga](https://crates.io/crates/ranga) | 0.21.4 | Image processing, color conversion, blending, filters | `blend`, `convert`, `filter`, `transform`, `composite`, `histogram` |
+| [tarang](https://crates.io/crates/tarang) | 0.20.3 | Media encoding/decoding, container muxing/demuxing | `audio`, `video`, `demux`, `core` |
+| [dhvani](https://crates.io/crates/dhvani) | 0.21.4 | Audio DSP, capture, mixing, metering, MIDI | `dsp`, `capture`, `buffer`, `clock`, `meter`, `graph` |
+| [ai-hwaccel](https://crates.io/crates/ai-hwaccel) | 0.21.3 | Hardware accelerator detection, disk-cached registry | encoder selection, fallback logic |
 
 Items handled by these crates are noted inline. Aethersafta's scope is **orchestration**: scene graph, source management, pipeline plumbing, transport protocols, and CLI/IPC.
 
@@ -25,19 +25,19 @@ Code quality, correctness, and performance passes before expanding scope.
 
 ### Project infrastructure (adopted from tarang/ai-hwaccel)
 
-Missing documentation and CI parity with sibling projects.
+Done in v0.21.3 except ADRs.
 
-- [ ] LICENSE file (AGPL-3.0-only, currently only in Cargo.toml)
-- [ ] CONTRIBUTING.md — system deps, dev workflow, project layout, commit conventions, PR guidelines
-- [ ] CODE_OF_CONDUCT.md (Contributor Covenant 2.1)
-- [ ] SECURITY.md — threat model (scene graph injection, GPU memory, streaming auth, FFI safety), supported versions, reporting process
-- [ ] CI: doc verification job (verify README, LICENSE, CHANGELOG, CONTRIBUTING, CODE_OF_CONDUCT, SECURITY, VERSION all exist)
-- [ ] CI: `cargo-semver-checks` to prevent accidental API breaks
-- [ ] CI: `cargo-vet` supply chain auditing with Mozilla imports
-- [ ] CI: coverage threshold enforcement (85%+, fail on drop)
-- [ ] CI: fuzz job on main pushes (30s per target, nightly toolchain)
-- [ ] `codecov.yml` with project target 85%, patch target 80%, ignore benches/fuzz/examples
-- [ ] Example binaries: `examples/compose.rs`, `examples/encode.rs`, `examples/record.rs`
+- [x] LICENSE file (AGPL-3.0-only)
+- [x] CONTRIBUTING.md
+- [x] CODE_OF_CONDUCT.md (Contributor Covenant 2.1)
+- [x] SECURITY.md
+- [x] CI: doc verification job
+- [x] CI: `cargo-semver-checks`
+- [x] CI: `cargo-vet` supply chain auditing
+- [x] CI: coverage threshold enforcement (85%+)
+- [x] CI: fuzz job on main pushes (30s per target)
+- [x] `codecov.yml` (project 85%, patch 80%)
+- [x] Example binaries: `examples/compose.rs`, `examples/encode.rs`, `examples/record.rs`
 - [ ] Architecture Decision Records (`docs/decisions/`) for key choices (ARGB vs NV12 internal format, SSE2 vs portable SIMD, tarang vs direct FFI)
 
 ### Code audit (3–5 rounds)
@@ -62,22 +62,26 @@ Each round: profile, optimize hotspot, benchmark before/after.
 
 ### Benchmarking infrastructure
 
-- [ ] Establish v0.21.3 baselines as golden numbers in `docs/development/performance.md`
+Partially done in v0.21.3 — baselines established, multi-layer and audio benchmarks added.
+
+- [x] Establish v0.21.3 baselines as golden numbers in `docs/development/performance.md`
 - [ ] Benchmark regression CI gate (fail on >10% regression from baseline)
-- [ ] Add end-to-end pipeline benchmark: source → composite → encode → file (1080p30, 5s)
-- [ ] Add multi-layer benchmark matrix: 1/3/5/10 layers × 720p/1080p/4K
+- [x] Add end-to-end pipeline benchmark: source → composite → encode → file (in `benches/encode.rs`)
+- [x] Add multi-layer benchmark matrix: 1/3/5 layers at 1080p, multi-scaled 2/4 layers (in `benches/compose.rs`)
 - [ ] Add memory benchmark: peak RSS during 10s recording at 1080p30
 - [ ] Latency percentile tracking: p50/p95/p99 per-frame times over 1000-frame runs
-- [ ] HTML benchmark dashboard via criterion (auto-generated)
+- [x] HTML benchmark dashboard via criterion (auto-generated in `target/criterion/`)
 - [ ] Compare across feature configs: `--no-default-features` vs `--features openh264-enc` vs `--features full`
 
 ### Testing hardening
+
+Partially done in v0.21.3 — 122 tests, integration tests added.
 
 - [ ] Fuzz targets: scene graph composition, frame validation (`fuzz/` crate with libfuzzer-sys)
 - [ ] Property-based tests for compositor (proptest: random layers, positions, opacities, dimensions)
 - [ ] Roundtrip tests: encode → decode → pixel comparison (via tarang)
 - [ ] Coverage target: 85%+ line coverage
-- [ ] Integration tests: multi-source composition, error recovery, feature-gated paths
+- [x] Integration tests: multi-source composition, BT.709 validation, audio mixer, error recovery, edge cases (122 tests total)
 
 > **Delegated to ranga**: NV12/YUV conversion fuzzing, ARGB frame validation. **Delegated to tarang**: encode/decode roundtrip codec coverage.
 
@@ -102,9 +106,12 @@ Deferred to v0.22.0:
 - [ ] Auto-detect resolution, framerate, pixel format
 
 ### Audio capture integration
-- [ ] Integrate dhvani PipeWire capture (`dhvani::capture`) for system audio, mic, per-app
-- [ ] Per-source volume control via `dhvani::buffer` mixing + `dhvani::meter`
-- [ ] Audio mixer graph via `dhvani::graph`
+
+Done in v0.21.3.
+
+- [x] Integrate dhvani PipeWire capture (`dhvani::capture`) for system audio, mic, per-app — `AudioCaptureManager`
+- [x] Per-source volume control via `dhvani::buffer` mixing + `dhvani::meter` — per-source `LevelMeter`, `GainSmoother`
+- [x] Audio mixer graph via `dhvani::graph` — `AudioPipeline` with node-based routing
 
 > **Delegated to tarang**: Hardware-accelerated encoding (NVENC, VA-API, QSV) — aethersafta selects encoder via `ai-hwaccel` and passes frames to tarang. **Delegated to dhvani**: PipeWire capture, audio mixing, metering.
 
@@ -165,7 +172,7 @@ Deferred to v0.22.0:
 
 > **Delegated to dhvani**: All DSP effects live in `dhvani::dsp`. Aethersafta integrates them into the audio pipeline via `dhvani::graph`.
 
-- [ ] Integrate `dhvani::dsp` effects (compressor, parametric EQ, limiter) into per-source audio chain
+- [x] Integrate `dhvani::dsp` effects (compressor, parametric EQ, limiter) into per-source audio chain — done in v0.21.3
 - [ ] Noise gate via dhvani compressor/limiter with threshold config
 - [ ] Noise suppression (RNNoise or similar — not yet in dhvani, may need new crate or dhvani feature)
 
@@ -221,9 +228,26 @@ All of the following must be true before cutting 1.0:
 
 > **Delegated to ranga**: Blur/sharpen (`ranga::filter`), vignette (`ranga::filter`).
 
-### Platform support
-- [ ] macOS CoreMedia capture (alternative to wlr-screencopy)
-- [ ] Windows Desktop Duplication API
+### Cross-platform capture & camera
+
+- [ ] **macOS: ScreenCaptureKit for screen capture** — replace
+  `wlr-screencopy-unstable-v1` with Apple's ScreenCaptureKit
+  (`SCStream`, `SCContentFilter`) for display and window capture on
+  macOS. Requires macOS 12.3+. Add `screencapturekit` Cargo feature.
+- [ ] **macOS: CoreMedia for camera** — `AVCaptureSession` via
+  CoreMedia/AVFoundation for webcam input, replacing V4L2. Device
+  enumeration via `AVCaptureDevice.DiscoverySession`.
+- [ ] **Windows: Desktop Duplication API for screen capture** — DXGI
+  Output Duplication via `windows-rs` for GPU-accelerated screen
+  capture. Supports multi-monitor and cursor overlay.
+- [ ] **Windows: Media Foundation for camera** — `IMFSourceReader` via
+  Media Foundation for webcam capture, replacing V4L2.
+- [ ] **Cross-platform: abstract capture sources behind platform trait** —
+  `CaptureSource` trait with `start()`, `next_frame()`, `stop()`,
+  `enumerate()` methods. Linux impl uses wlr-screencopy + V4L2, macOS
+  uses ScreenCaptureKit + CoreMedia, Windows uses DXGI + Media
+  Foundation. Feature-gated: `wayland` (default), `screencapturekit`,
+  `dxgi`.
 - [ ] Headless mode (no display server, for server-side compositing)
 - [ ] Windows release builds in CI
 

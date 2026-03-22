@@ -148,17 +148,71 @@ fn bench_composite_scaled(c: &mut Criterion) {
 // Color conversion benchmark
 // ---------------------------------------------------------------------------
 
-fn bench_argb_to_yuv(c: &mut Criterion) {
-    use aethersafta::encode::argb_to_yuv420p;
+fn bench_composite_multi_scaled(c: &mut Criterion) {
+    let mut group = c.benchmark_group("composite_multi_scaled");
 
-    let mut group = c.benchmark_group("argb_to_yuv420p");
-    for &(w, h, label) in &[(1920, 1080, "1080p"), (3840, 2160, "4K")] {
-        let argb = vec![128u8; (w * h * 4) as usize];
-        group.bench_with_input(BenchmarkId::new("convert", label), &(), |b, _| {
-            b.iter(|| argb_to_yuv420p(&argb, w, h))
-        });
+    for &n_layers in &[2, 4] {
+        let w = 1920;
+        let h = 1080;
+        let comp = Compositor::new(w, h);
+        let mut scene = SceneGraph::new(w, h, 30);
+        let mut frames = HashMap::new();
+
+        for i in 0..n_layers {
+            let mut layer = Layer::new(
+                format!("scaled-{i}"),
+                LayerContent::Source {
+                    source_id: uuid::Uuid::new_v4(),
+                },
+            );
+            layer.z_index = i;
+            layer.opacity = 0.7;
+            // Each layer is 640x480 scaled to 960x540
+            layer.size = Some((960, 540));
+            layer.position = (i * 100, i * 80);
+            let lid = layer.id;
+            scene.add_layer(layer);
+            frames.insert(lid, make_argb_frame(640, 480, 128 + i as u8 * 30));
+        }
+
+        group.bench_with_input(
+            BenchmarkId::new("1080p_bicubic", format!("{n_layers}_layers")),
+            &(),
+            |b, _| b.iter(|| comp.compose(&scene, &frames, 0)),
+        );
     }
     group.finish();
+}
+
+fn bench_composite_4k(c: &mut Criterion) {
+    let w = 3840;
+    let h = 2160;
+    let comp = Compositor::new(w, h);
+    let mut scene = SceneGraph::new(w, h, 30);
+
+    // Background fill
+    let mut bg = Layer::new("bg", LayerContent::ColorFill { color: [30, 30, 30, 255] });
+    bg.z_index = 0;
+    scene.add_layer(bg);
+
+    // Single 4K source layer
+    let mut layer = Layer::new(
+        "4k-src",
+        LayerContent::Source {
+            source_id: uuid::Uuid::nil(),
+        },
+    );
+    layer.z_index = 1;
+    layer.opacity = 0.9;
+    let lid = layer.id;
+    scene.add_layer(layer);
+
+    let mut frames = HashMap::new();
+    frames.insert(lid, make_argb_frame(w, h, 180));
+
+    c.bench_function("composite_4k_bg_plus_source", |b| {
+        b.iter(|| comp.compose(&scene, &frames, 0))
+    });
 }
 
 criterion_group!(
@@ -168,6 +222,7 @@ criterion_group!(
     bench_composite_color_fill,
     bench_composite_source_layers,
     bench_composite_scaled,
-    bench_argb_to_yuv,
+    bench_composite_multi_scaled,
+    bench_composite_4k,
 );
 criterion_main!(benches);
