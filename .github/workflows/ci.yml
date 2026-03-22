@@ -175,7 +175,7 @@ jobs:
             echo "No tags found, skipping semver check"
             exit 0
           fi
-          cargo semver-checks check-release --baseline-rev "$BASELINE" --default-features --features pipewire,hwaccel,rtmp,srt,openh264-enc
+          cargo semver-checks check-release --baseline-rev "$BASELINE" --only-explicit-features --features default,pipewire,hwaccel,rtmp,srt,openh264-enc
 
   vet:
     name: Supply Chain (cargo-vet)
