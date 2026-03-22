@@ -8,13 +8,12 @@ use std::collections::HashMap;
 use std::time::Instant;
 
 use aethersafta::{
-    Compositor, EncodePipeline, EncoderConfig, FrameClock,
-    Layer, SceneGraph,
-    output::{file::FileOutput, OutputSink},
+    Compositor, EncodePipeline, EncoderConfig, FrameClock, Layer, SceneGraph,
+    output::{OutputSink, file::FileOutput},
+    scene::LayerContent,
+    source::Source,
     source::image::ImageSource,
     source::synthetic::{Pattern, SyntheticSource},
-    source::Source,
-    scene::LayerContent,
 };
 
 fn main() -> anyhow::Result<()> {
@@ -28,7 +27,12 @@ fn main() -> anyhow::Result<()> {
     let mut scene = SceneGraph::new(width, height, fps);
 
     // Background
-    let mut bg = Layer::new("bg", LayerContent::ColorFill { color: [20, 20, 20, 255] });
+    let mut bg = Layer::new(
+        "bg",
+        LayerContent::ColorFill {
+            color: [20, 20, 20, 255],
+        },
+    );
     bg.z_index = 0;
     scene.add_layer(bg);
 
@@ -38,10 +42,21 @@ fn main() -> anyhow::Result<()> {
         Box::new(ImageSource::open(path)?)
     } else {
         println!("no image path given, using synthetic source");
-        Box::new(SyntheticSource::new("solid", width, height, fps, Pattern::Solid([255, 100, 60, 200])))
+        Box::new(SyntheticSource::new(
+            "solid",
+            width,
+            height,
+            fps,
+            Pattern::Solid([255, 100, 60, 200]),
+        ))
     };
 
-    let mut content = Layer::new(source.name(), LayerContent::Source { source_id: source.id() });
+    let mut content = Layer::new(
+        source.name(),
+        LayerContent::Source {
+            source_id: source.id(),
+        },
+    );
     content.z_index = 1;
     content.size = Some((width, height));
     let content_id = scene.add_layer(content);
@@ -81,7 +96,10 @@ fn main() -> anyhow::Result<()> {
             let ratio = video / wall;
             println!(
                 "  t={:.1}s  frames={}  wall={:.2}s  speed={:.1}x",
-                video, clock.frame_count(), wall, ratio,
+                video,
+                clock.frame_count(),
+                wall,
+                ratio,
             );
         }
     }

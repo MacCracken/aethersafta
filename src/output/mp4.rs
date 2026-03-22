@@ -123,13 +123,8 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("test.mp4");
 
-        let mut out = Mp4Output::create_video_only(
-            &path,
-            tarang::core::VideoCodec::H264,
-            320,
-            240,
-        )
-        .unwrap();
+        let mut out =
+            Mp4Output::create_video_only(&path, tarang::core::VideoCodec::H264, 320, 240).unwrap();
 
         // Write some fake video packets
         for i in 0..5 {

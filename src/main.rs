@@ -105,9 +105,9 @@ fn main() {
             audio,
             audio_gain,
         } => {
-            if let Err(e) =
-                cmd_record(&source, &output, duration, fps, width, height, bitrate, &audio, audio_gain)
-            {
+            if let Err(e) = cmd_record(
+                &source, &output, duration, fps, width, height, bitrate, &audio, audio_gain,
+            ) {
                 error!("{e:#}");
                 std::process::exit(1);
             }
@@ -132,9 +132,8 @@ fn cmd_info() {
     // Hardware accelerators
     #[cfg(feature = "hwaccel")]
     {
-        let registry = ai_hwaccel::DiskCachedRegistry::new(
-            std::time::Duration::from_secs(60),
-        ).get();
+        let registry =
+            ai_hwaccel::DiskCachedRegistry::new(std::time::Duration::from_secs(60)).get();
         let profiles = registry.all_profiles();
         if profiles.is_empty() {
             println!("Hardware: no accelerators detected");
@@ -280,7 +279,8 @@ fn setup_audio(
         })?)
     };
 
-    let mut mixer = aethersafta::audio::AudioMixer::new(aethersafta::audio::AudioMixerConfig::default());
+    let mut mixer =
+        aethersafta::audio::AudioMixer::new(aethersafta::audio::AudioMixerConfig::default());
     let mut src_config = aethersafta::audio::AudioSourceConfig::new("PipeWire Capture");
     src_config.gain_db = gain_db;
     src_config.device_id = device_id;
@@ -401,7 +401,11 @@ fn cmd_record(
                 let [l, r] = [mixer.master_peak_db(0), mixer.master_peak_db(1)];
                 info!(
                     "frame {}: {:.1}s, {} bytes, audio L={:.1}dB R={:.1}dB",
-                    frame_num + 1, elapsed, bytes, l, r,
+                    frame_num + 1,
+                    elapsed,
+                    bytes,
+                    l,
+                    r,
                 );
             } else {
                 info!("frame {}: {:.1}s, {} bytes", frame_num + 1, elapsed, bytes);

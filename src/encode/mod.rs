@@ -136,15 +136,12 @@ impl EncodePipeline {
 
             // Use disk-cached registry to avoid re-probing hardware every run.
             // Cache persists to $XDG_CACHE_HOME/ai-hwaccel/registry.json with 60s TTL.
-            let registry = ai_hwaccel::DiskCachedRegistry::new(
-                std::time::Duration::from_secs(60),
-            ).get();
-            let has_gpu = registry.all_profiles().iter().any(|p| {
-                matches!(
-                    p.family,
-                    ai_hwaccel::AcceleratorFamily::Gpu
-                )
-            });
+            let registry =
+                ai_hwaccel::DiskCachedRegistry::new(std::time::Duration::from_secs(60)).get();
+            let has_gpu = registry
+                .all_profiles()
+                .iter()
+                .any(|p| matches!(p.family, ai_hwaccel::AcceleratorFamily::Gpu));
 
             if !has_gpu {
                 tracing::debug!("no GPU detected, skipping VA-API");
@@ -163,10 +160,7 @@ impl EncodePipeline {
 
             match tarang::video::VaapiEncoder::new(&vaapi_config) {
                 Ok(enc) => {
-                    tracing::info!(
-                        "encoder: VA-API H.264 ({})",
-                        enc.driver_name()
-                    );
+                    tracing::info!("encoder: VA-API H.264 ({})", enc.driver_name());
                     return Some(EncoderInner::Vaapi(enc));
                 }
                 Err(e) => {
@@ -219,14 +213,24 @@ impl EncodePipeline {
                 let video_frame = make_video_frame(frame);
                 let nal_data = enc.encode(&video_frame)?;
                 self.frames_encoded += 1;
-                Ok(make_packet(nal_data, frame.pts_us, self.frames_encoded, self.config.keyframe_interval))
+                Ok(make_packet(
+                    nal_data,
+                    frame.pts_us,
+                    self.frames_encoded,
+                    self.config.keyframe_interval,
+                ))
             }
             #[cfg(feature = "openh264-enc")]
             EncoderInner::OpenH264(enc) => {
                 let video_frame = make_video_frame(frame);
                 let nal_data = enc.encode(&video_frame)?;
                 self.frames_encoded += 1;
-                Ok(make_packet(nal_data, frame.pts_us, self.frames_encoded, self.config.keyframe_interval))
+                Ok(make_packet(
+                    nal_data,
+                    frame.pts_us,
+                    self.frames_encoded,
+                    self.config.keyframe_interval,
+                ))
             }
             EncoderInner::Uninitialised => {
                 anyhow::bail!("encoder not initialised — call init() first");
@@ -258,9 +262,8 @@ pub fn detect_best_encoder(codec: VideoCodec) -> EncoderBackend {
     #[cfg(all(feature = "hwaccel", feature = "vaapi"))]
     {
         if codec == VideoCodec::H264 {
-            let registry = ai_hwaccel::DiskCachedRegistry::new(
-                std::time::Duration::from_secs(60),
-            ).get();
+            let registry =
+                ai_hwaccel::DiskCachedRegistry::new(std::time::Duration::from_secs(60)).get();
             let has_gpu = registry
                 .all_profiles()
                 .iter()
@@ -293,7 +296,12 @@ fn make_video_frame(frame: &RawFrame) -> tarang::core::VideoFrame {
 }
 
 #[cfg(any(feature = "vaapi", feature = "openh264-enc"))]
-fn make_packet(data: Vec<u8>, pts_us: u64, frames_encoded: u64, keyframe_interval: u32) -> EncodedPacket {
+fn make_packet(
+    data: Vec<u8>,
+    pts_us: u64,
+    frames_encoded: u64,
+    keyframe_interval: u32,
+) -> EncodedPacket {
     EncodedPacket {
         data,
         pts_us,
@@ -315,7 +323,8 @@ pub fn argb_to_yuv420p(argb: &[u8], width: u32, height: u32) -> Vec<u8> {
     )
     .expect("ARGB buffer size mismatch");
     let rgba_buf = ranga::convert::argb8_to_rgba8(&argb_buf).expect("ARGB→RGBA conversion");
-    let yuv_buf = ranga::convert::rgba_to_yuv420p_bt709(&rgba_buf).expect("RGBA→YUV420p BT.709 conversion");
+    let yuv_buf =
+        ranga::convert::rgba_to_yuv420p_bt709(&rgba_buf).expect("RGBA→YUV420p BT.709 conversion");
     yuv_buf.data
 }
 

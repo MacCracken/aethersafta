@@ -459,7 +459,11 @@ fn latency_budget_over_budget() {
     budget.encode_us = 12000;
     budget.output_us = 6000; // total = 40000us > 33000us
     assert!(!budget.within_budget());
-    assert!(budget.headroom_us() < 0, "headroom={}", budget.headroom_us());
+    assert!(
+        budget.headroom_us() < 0,
+        "headroom={}",
+        budget.headroom_us()
+    );
 }
 
 #[test]
@@ -491,7 +495,10 @@ fn scene_graph_empty_compose() {
     let result = compositor.compose(&scene, &frames, 0);
 
     // All pixels should be zero (no layers = blank output)
-    assert!(result.data.iter().all(|&b| b == 0), "expected all zeros for empty scene");
+    assert!(
+        result.data.iter().all(|&b| b == 0),
+        "expected all zeros for empty scene"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -534,10 +541,16 @@ fn audio_mixer_integration() {
     source_buffers.insert(id2, buf2);
 
     let output = mixer.mix(&mut source_buffers);
-    assert!(output.is_some(), "mix should produce output with active sources");
+    assert!(
+        output.is_some(),
+        "mix should produce output with active sources"
+    );
 
     let master_peak = mixer.master_peak_db(0);
-    assert!(master_peak > -60.0, "peak_db={master_peak}, expected reasonable level");
+    assert!(
+        master_peak > -60.0,
+        "peak_db={master_peak}, expected reasonable level"
+    );
 }
 
 // ---------------------------------------------------------------------------

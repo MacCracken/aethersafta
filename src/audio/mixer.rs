@@ -39,10 +39,7 @@ impl AudioMixer {
     /// Create a new mixer with the given configuration.
     pub fn new(config: AudioMixerConfig) -> Self {
         let master_limiter = if config.master_limiter {
-            dsp::EnvelopeLimiter::new(
-                dsp::LimiterParams::default(),
-                config.sample_rate,
-            ).ok()
+            dsp::EnvelopeLimiter::new(dsp::LimiterParams::default(), config.sample_rate).ok()
         } else {
             None
         };
@@ -67,9 +64,7 @@ impl AudioMixer {
     /// Add a new audio source. Returns its unique ID.
     pub fn add_source(&mut self, config: AudioSourceConfig) -> AudioSourceId {
         let id = Uuid::new_v4();
-        let mut gain_smoother = dsp::GainSmoother::from_params(
-            dsp::GainSmootherParams::default(),
-        );
+        let mut gain_smoother = dsp::GainSmoother::from_params(dsp::GainSmootherParams::default());
         // Pre-set to initial gain so first buffer isn't smoothed from unity
         gain_smoother.reset(dsp::db_to_amplitude(config.gain_db));
 
@@ -78,12 +73,12 @@ impl AudioMixer {
             gain_smoother,
             compressor: None,
             eq: None,
-            meter: LevelMeter::new(self.config.channels as usize, self.config.sample_rate as f32),
+            meter: LevelMeter::new(
+                self.config.channels as usize,
+                self.config.sample_rate as f32,
+            ),
         };
-        self.sources.push(AudioSourceEntry {
-            id,
-            config,
-        });
+        self.sources.push(AudioSourceEntry { id, config });
         self.source_dsp.insert(id, dsp_state);
         id
     }
@@ -121,8 +116,7 @@ impl AudioMixer {
         params: dsp::CompressorParams,
     ) -> bool {
         if let Some(dsp_state) = self.source_dsp.get_mut(&id) {
-            dsp_state.compressor =
-                dsp::Compressor::new(params, self.config.sample_rate).ok();
+            dsp_state.compressor = dsp::Compressor::new(params, self.config.sample_rate).ok();
             true
         } else {
             false
@@ -130,11 +124,7 @@ impl AudioMixer {
     }
 
     /// Enable per-source EQ with the given bands.
-    pub fn set_source_eq(
-        &mut self,
-        id: AudioSourceId,
-        bands: Vec<dsp::EqBandConfig>,
-    ) -> bool {
+    pub fn set_source_eq(&mut self, id: AudioSourceId, bands: Vec<dsp::EqBandConfig>) -> bool {
         if let Some(dsp_state) = self.source_dsp.get_mut(&id) {
             dsp_state.eq = Some(dsp::ParametricEq::new(
                 bands,
@@ -164,12 +154,16 @@ impl AudioMixer {
 
     /// Per-source peak level for a channel in dB (post-DSP, pre-mix).
     pub fn source_peak_db(&self, id: AudioSourceId, channel: usize) -> Option<f32> {
-        self.source_dsp.get(&id).map(|dsp| dsp.meter.peak_db(channel))
+        self.source_dsp
+            .get(&id)
+            .map(|dsp| dsp.meter.peak_db(channel))
     }
 
     /// Per-source RMS level for a channel in dB (post-DSP, pre-mix).
     pub fn source_rms_db(&self, id: AudioSourceId, channel: usize) -> Option<f32> {
-        self.source_dsp.get(&id).map(|dsp| dsp.meter.rms_db(channel))
+        self.source_dsp
+            .get(&id)
+            .map(|dsp| dsp.meter.rms_db(channel))
     }
 
     /// Master peak level for a channel in dB.
@@ -404,15 +398,16 @@ mod tests {
         });
         let id = mixer.add_source(AudioSourceConfig::new("EQ'd"));
 
-        mixer.set_source_eq(id, vec![
-            dsp::EqBandConfig {
+        mixer.set_source_eq(
+            id,
+            vec![dsp::EqBandConfig {
                 band_type: dsp::BandType::HighPass,
                 freq_hz: 80.0,
                 gain_db: 0.0,
                 q: 0.707,
                 enabled: true,
-            },
-        ]);
+            }],
+        );
 
         let mut buffers = HashMap::new();
         buffers.insert(id, test_buffer(0.5, 1024));
@@ -429,14 +424,17 @@ mod tests {
         });
         let id = mixer.add_source(AudioSourceConfig::new("Compressed"));
 
-        mixer.set_source_compressor(id, dsp::CompressorParams {
-            threshold_db: -20.0,
-            ratio: 4.0,
-            attack_ms: 5.0,
-            release_ms: 50.0,
-            makeup_gain_db: 0.0,
-            knee_db: 0.0,
-        });
+        mixer.set_source_compressor(
+            id,
+            dsp::CompressorParams {
+                threshold_db: -20.0,
+                ratio: 4.0,
+                attack_ms: 5.0,
+                release_ms: 50.0,
+                makeup_gain_db: 0.0,
+                knee_db: 0.0,
+            },
+        );
 
         let mut buffers = HashMap::new();
         buffers.insert(id, test_buffer(0.8, 1024));
@@ -647,13 +645,21 @@ mod tests {
         let mut buffers = HashMap::new();
         buffers.insert(id1, test_buffer(0.5, 512));
         let result = mixer.mix(&mut buffers).unwrap();
-        assert_eq!(result.channels(), 2, "single source should preserve 2 channels");
+        assert_eq!(
+            result.channels(),
+            2,
+            "single source should preserve 2 channels"
+        );
 
         // Multiple sources mix
         let mut buffers = HashMap::new();
         buffers.insert(id1, test_buffer(0.3, 512));
         buffers.insert(id2, test_buffer(0.4, 512));
         let result = mixer.mix(&mut buffers).unwrap();
-        assert_eq!(result.channels(), 2, "multi source should preserve 2 channels");
+        assert_eq!(
+            result.channels(),
+            2,
+            "multi source should preserve 2 channels"
+        );
     }
 }

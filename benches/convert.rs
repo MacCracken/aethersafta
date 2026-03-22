@@ -88,10 +88,7 @@ fn bench_nv12_to_argb(c: &mut Criterion) {
 
 fn bench_nv12_roundtrip(c: &mut Criterion) {
     let mut group = c.benchmark_group("nv12_roundtrip");
-    for &(w, h, label) in &[
-        (640, 480, "480p"),
-        (1920, 1080, "1080p"),
-    ] {
+    for &(w, h, label) in &[(640, 480, "480p"), (1920, 1080, "1080p")] {
         let argb = make_argb(w, h);
         group.bench_with_input(BenchmarkId::new("argb_nv12_argb", label), &(), |b, _| {
             b.iter(|| {

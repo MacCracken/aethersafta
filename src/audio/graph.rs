@@ -210,7 +210,8 @@ impl MasterNode {
             dhvani::dsp::EnvelopeLimiter::new(
                 dhvani::dsp::LimiterParams::default(),
                 config.sample_rate,
-            ).ok()
+            )
+            .ok()
         } else {
             None
         };
@@ -293,11 +294,7 @@ impl AudioPipeline {
         let mixer_node_id = NodeId::next();
         let master_node_id = NodeId::next();
 
-        let processor = GraphProcessor::new(
-            config.channels,
-            config.sample_rate,
-            1024,
-        );
+        let processor = GraphProcessor::new(config.channels, config.sample_rate, 1024);
 
         let mut pipeline = Self {
             config,
@@ -313,22 +310,21 @@ impl AudioPipeline {
     }
 
     /// Add a source to the pipeline. Creates input → gain → DSP → mixer chain.
-    pub fn add_source(
-        &mut self,
-        id: AudioSourceId,
-        gain: f32,
-        pan: f32,
-    ) {
+    pub fn add_source(&mut self, id: AudioSourceId, gain: f32, pan: f32) {
         let input_id = NodeId::next();
         let gain_id = NodeId::next();
         let dsp_id = NodeId::next();
 
-        self.source_nodes.insert(id, SourceNodes {
-            input: input_id,
-            gain: gain_id,
-            dsp: dsp_id,
-        });
-        self.source_meters.insert(id, dhvani::meter::PeakMeter::new());
+        self.source_nodes.insert(
+            id,
+            SourceNodes {
+                input: input_id,
+                gain: gain_id,
+                dsp: dsp_id,
+            },
+        );
+        self.source_meters
+            .insert(id, dhvani::meter::PeakMeter::new());
 
         let _ = (gain, pan); // Used when building the graph below.
         self.dirty = true;
@@ -352,16 +348,16 @@ impl AudioPipeline {
     fn compile_and_swap(&mut self) {
         let mut graph = Graph::new();
         graph.add_node(self.mixer_node_id, Box::new(MixerNode));
-        graph.add_node(
-            self.master_node_id,
-            Box::new(MasterNode::new(&self.config)),
-        );
+        graph.add_node(self.master_node_id, Box::new(MasterNode::new(&self.config)));
         graph.connect(self.mixer_node_id, self.master_node_id);
 
         for nodes in self.source_nodes.values() {
             graph.add_node(
                 nodes.input,
-                Box::new(InputNode::new(self.config.channels, self.config.sample_rate)),
+                Box::new(InputNode::new(
+                    self.config.channels,
+                    self.config.sample_rate,
+                )),
             );
             graph.add_node(nodes.gain, Box::new(GainNode::new(1.0)));
             graph.add_node(nodes.dsp, Box::new(DspChainNode::new(0.0)));

@@ -25,17 +25,13 @@ fn bench_mix_single_source(c: &mut Criterion) {
         });
         let id = mixer.add_source(AudioSourceConfig::new("Source"));
 
-        group.bench_with_input(
-            BenchmarkId::new("frames", frames),
-            &frames,
-            |b, &frames| {
-                b.iter(|| {
-                    let mut buffers = HashMap::new();
-                    buffers.insert(id, test_buffer(0.5, frames));
-                    mixer.mix(&mut buffers)
-                })
-            },
-        );
+        group.bench_with_input(BenchmarkId::new("frames", frames), &frames, |b, &frames| {
+            b.iter(|| {
+                let mut buffers = HashMap::new();
+                buffers.insert(id, test_buffer(0.5, frames));
+                mixer.mix(&mut buffers)
+            })
+        });
     }
     group.finish();
 }

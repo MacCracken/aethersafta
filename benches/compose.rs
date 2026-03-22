@@ -191,7 +191,12 @@ fn bench_composite_4k(c: &mut Criterion) {
     let mut scene = SceneGraph::new(w, h, 30);
 
     // Background fill
-    let mut bg = Layer::new("bg", LayerContent::ColorFill { color: [30, 30, 30, 255] });
+    let mut bg = Layer::new(
+        "bg",
+        LayerContent::ColorFill {
+            color: [30, 30, 30, 255],
+        },
+    );
     bg.z_index = 0;
     scene.add_layer(bg);
 

@@ -68,11 +68,14 @@ impl AudioCaptureManager {
         let mut capture = PwCapture::new(capture_config)?;
         capture.start()?;
 
-        self.sources.insert(id, CaptureSource {
-            capture,
-            config,
-            running: true,
-        });
+        self.sources.insert(
+            id,
+            CaptureSource {
+                capture,
+                config,
+                running: true,
+            },
+        );
 
         Ok(())
     }
@@ -93,9 +96,7 @@ impl AudioCaptureManager {
     ///
     /// Returns a map of source ID → latest audio buffer, suitable for
     /// passing directly to [`AudioMixer::mix`](super::AudioMixer::mix).
-    pub fn drain_buffers(
-        &self,
-    ) -> HashMap<AudioSourceId, dhvani::buffer::AudioBuffer> {
+    pub fn drain_buffers(&self) -> HashMap<AudioSourceId, dhvani::buffer::AudioBuffer> {
         let mut buffers = HashMap::new();
 
         for (&id, source) in &self.sources {

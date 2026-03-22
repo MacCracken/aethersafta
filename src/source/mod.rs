@@ -179,9 +179,15 @@ mod tests {
     fn source_config_serde_all_variants() {
         let variants: Vec<SourceConfig> = vec![
             SourceConfig::Screen { monitor: Some(0) },
-            SourceConfig::Camera { device: "/dev/video0".into() },
-            SourceConfig::MediaFile { path: "/tmp/test.mp4".into() },
-            SourceConfig::Image { path: "/tmp/bg.png".into() },
+            SourceConfig::Camera {
+                device: "/dev/video0".into(),
+            },
+            SourceConfig::MediaFile {
+                path: "/tmp/test.mp4".into(),
+            },
+            SourceConfig::Image {
+                path: "/tmp/bg.png".into(),
+            },
         ];
         for original in &variants {
             let json = serde_json::to_string(original).expect("serialize");

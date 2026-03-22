@@ -470,10 +470,16 @@ mod tests {
         assert_eq!(result.height, 8);
         // The 4x4 region should have non-zero pixels from the bicubic-resized source
         let idx_inside = (8 + 1) * 4; // pixel (1,1) inside 4x4 region
-        assert!(result.data[idx_inside] > 0, "scaled region should have content");
+        assert!(
+            result.data[idx_inside] > 0,
+            "scaled region should have content"
+        );
         // Pixel outside the 4x4 layer should be untouched (transparent black)
         let idx_outside = (5 * 8 + 5) * 4; // pixel (5,5) outside layer
-        assert_eq!(result.data[idx_outside], 0, "outside layer should be transparent");
+        assert_eq!(
+            result.data[idx_outside], 0,
+            "outside layer should be transparent"
+        );
     }
 
     #[test]
@@ -542,7 +548,10 @@ mod tests {
         scene.add_layer(layer);
 
         let frame = comp.compose(&scene, &HashMap::new(), 0);
-        assert!(frame.data.iter().all(|&b| b == 0), "transparent layer should not affect output");
+        assert!(
+            frame.data.iter().all(|&b| b == 0),
+            "transparent layer should not affect output"
+        );
     }
 
     #[test]
@@ -560,7 +569,10 @@ mod tests {
         scene.add_layer(layer);
 
         let frame = comp.compose(&scene, &HashMap::new(), 0);
-        assert!(frame.data.iter().all(|&b| b == 0), "off-canvas layer should produce no change");
+        assert!(
+            frame.data.iter().all(|&b| b == 0),
+            "off-canvas layer should produce no change"
+        );
     }
 
     #[test]

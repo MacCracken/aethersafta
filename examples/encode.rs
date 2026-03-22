@@ -8,12 +8,11 @@ use std::collections::HashMap;
 use std::time::Instant;
 
 use aethersafta::{
-    Compositor, EncodePipeline, EncoderConfig, FrameClock,
-    Layer, SceneGraph,
-    output::{file::FileOutput, OutputSink},
-    source::synthetic::{Pattern, SyntheticSource},
-    source::Source,
+    Compositor, EncodePipeline, EncoderConfig, FrameClock, Layer, SceneGraph,
+    output::{OutputSink, file::FileOutput},
     scene::LayerContent,
+    source::Source,
+    source::synthetic::{Pattern, SyntheticSource},
 };
 
 fn main() -> anyhow::Result<()> {

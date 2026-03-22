@@ -9,9 +9,9 @@ use std::time::{Duration, Instant};
 
 use aethersafta::{
     Compositor, FrameClock, LatencyBudget, Layer, SceneGraph,
-    source::synthetic::{Pattern, SyntheticSource},
-    source::Source,
     scene::LayerContent,
+    source::Source,
+    source::synthetic::{Pattern, SyntheticSource},
 };
 
 fn main() -> anyhow::Result<()> {
@@ -21,9 +21,12 @@ fn main() -> anyhow::Result<()> {
     let mut scene = SceneGraph::new(width, height, fps);
 
     // Background: solid dark blue
-    let bg = Layer::new("background", LayerContent::ColorFill {
-        color: [30, 40, 80, 255],
-    });
+    let bg = Layer::new(
+        "background",
+        LayerContent::ColorFill {
+            color: [30, 40, 80, 255],
+        },
+    );
     scene.add_layer(bg);
 
     // Overlay: synthetic gradient bound to a Source layer
@@ -76,7 +79,11 @@ fn main() -> anyhow::Result<()> {
     println!(
         "done: {} frames, {} valid",
         clock.frame_count(),
-        if !clock.is_behind() { "on time" } else { "behind schedule" },
+        if !clock.is_behind() {
+            "on time"
+        } else {
+            "behind schedule"
+        },
     );
     Ok(())
 }
