@@ -8,6 +8,7 @@ use std::collections::HashMap;
 use dhvani::buffer::{AudioBuffer, BufferPool};
 use dhvani::dsp;
 use dhvani::meter::LevelMeter;
+use tracing;
 use uuid::Uuid;
 
 use super::{AudioMixerConfig, AudioSourceConfig, AudioSourceEntry, AudioSourceId};
@@ -89,6 +90,7 @@ impl AudioMixer {
                 self.config.sample_rate as f32,
             ),
         };
+        tracing::debug!(source_id = %id, name = %config.name, "mixer: source added");
         self.sources.push(AudioSourceEntry { id, config });
         self.source_dsp.insert(id, dsp_state);
         id
@@ -99,7 +101,11 @@ impl AudioMixer {
         let before = self.sources.len();
         self.sources.retain(|s| s.id != id);
         self.source_dsp.remove(&id);
-        self.sources.len() < before
+        let removed = self.sources.len() < before;
+        if removed {
+            tracing::debug!(source_id = %id, "mixer: source removed");
+        }
+        removed
     }
 
     /// Get source configuration by ID.
@@ -188,8 +194,9 @@ impl AudioMixer {
 
     /// Enable per-source delay with the given parameters.
     ///
-    /// `delay_ms` is the delay time, `feedback` controls echo repetition
-    /// (0.0–1.0), `mix` controls dry/wet balance (0.0 = dry, 1.0 = wet).
+    /// `delay_ms` is the delay time (clamped to `0.1..=5000.0`), `feedback`
+    /// controls echo repetition (clamped to `0.0..=0.95` to prevent infinite
+    /// buildup), `mix` controls dry/wet balance (clamped to `0.0..=1.0`).
     pub fn set_source_delay(
         &mut self,
         id: AudioSourceId,
@@ -198,9 +205,12 @@ impl AudioMixer {
         mix: f32,
     ) -> bool {
         if let Some(dsp_state) = self.source_dsp.get_mut(&id) {
+            let delay_ms = delay_ms.clamp(0.1, 5000.0);
+            let feedback = feedback.clamp(0.0, 0.95);
+            let mix = mix.clamp(0.0, 1.0);
             dsp_state.delay = Some(dsp::DelayLine::new(
                 delay_ms,
-                delay_ms * 2.0, // max delay headroom
+                delay_ms * 2.0,
                 feedback,
                 mix,
                 self.config.sample_rate,
@@ -213,10 +223,10 @@ impl AudioMixer {
     }
 
     /// Enable per-source noise gate. Samples below the threshold (in linear
-    /// amplitude, e.g. 0.01) are silenced.
+    /// amplitude, e.g. 0.01) are silenced. Threshold is clamped to `0.0..=1.0`.
     pub fn set_source_noise_gate(&mut self, id: AudioSourceId, threshold: f32) -> bool {
         if let Some(dsp_state) = self.source_dsp.get_mut(&id) {
-            dsp_state.noise_gate_threshold = Some(threshold);
+            dsp_state.noise_gate_threshold = Some(threshold.clamp(0.0, 1.0));
             true
         } else {
             false
@@ -301,6 +311,7 @@ impl AudioMixer {
     /// `source_buffers` maps source IDs to their captured audio buffers.
     /// Sources not in the map (or muted) are treated as silence.
     /// Returns `None` if no sources contributed audio.
+    #[inline]
     pub fn mix(
         &mut self,
         source_buffers: &mut HashMap<AudioSourceId, AudioBuffer>,
@@ -319,8 +330,10 @@ impl AudioMixer {
             let mut buf = buf;
 
             // Apply per-source DSP chain:
-            //   gain → noise gate → EQ → graphic EQ → compressor → de-esser
+            //   gain → EQ → noise gate → compressor → de-esser
             //   → delay → reverb → pan → sanitize → meter
+            //
+            // EQ before gate so HP filter removes rumble that would hold gate open.
             if let Some(dsp_state) = self.source_dsp.get_mut(&entry.id) {
                 // Smoothed gain (click-free volume transitions)
                 let target_gain = dsp::db_to_amplitude(entry.config.gain_db);
@@ -329,16 +342,16 @@ impl AudioMixer {
                     buf.apply_gain(smoothed_gain);
                 }
 
-                // Noise gate (silence below threshold)
-                if let Some(threshold) = dsp_state.noise_gate_threshold {
-                    dsp::noise_gate(&mut buf, threshold);
-                }
-
-                // EQ (parametric or graphic — parametric takes priority)
+                // EQ (parametric or graphic — parametric takes priority if both set)
                 if let Some(eq) = &mut dsp_state.eq {
                     eq.process(&mut buf);
                 } else if let Some(geq) = &mut dsp_state.graphic_eq {
                     geq.process(&mut buf);
+                }
+
+                // Noise gate after EQ (HP filter removes rumble first)
+                if let Some(threshold) = dsp_state.noise_gate_threshold {
+                    dsp::noise_gate(&mut buf, threshold);
                 }
 
                 // Dynamics
@@ -981,5 +994,259 @@ mod tests {
                 assert!(!s.is_infinite(), "full chain produced Inf");
             }
         }
+    }
+
+    #[test]
+    fn sanitize_prevents_inf() {
+        let mut mixer = AudioMixer::new(AudioMixerConfig {
+            master_limiter: false,
+            ..Default::default()
+        });
+        let id = mixer.add_source(AudioSourceConfig::new("Inf source"));
+
+        let mut buf = test_buffer(0.5, 512);
+        for sample in buf.samples_mut() {
+            *sample = f32::INFINITY;
+        }
+
+        let mut buffers = HashMap::new();
+        buffers.insert(id, buf);
+        let result = mixer.mix(&mut buffers).unwrap();
+        for &s in result.samples() {
+            assert!(!s.is_nan(), "output contains NaN");
+            assert!(!s.is_infinite(), "output contains Inf");
+        }
+    }
+
+    #[test]
+    fn eq_mutual_exclusion() {
+        let mut mixer = AudioMixer::new(AudioMixerConfig {
+            master_limiter: false,
+            ..Default::default()
+        });
+        let id = mixer.add_source(AudioSourceConfig::new("EQ Test"));
+
+        // Set both parametric and graphic EQ
+        mixer.set_source_eq(
+            id,
+            vec![dsp::EqBandConfig {
+                band_type: dsp::BandType::HighPass,
+                freq_hz: 80.0,
+                gain_db: 0.0,
+                q: 0.707,
+                enabled: true,
+            }],
+        );
+        mixer.set_source_graphic_eq(
+            id,
+            dsp::GraphicEqSettings {
+                enabled: true,
+                bands: [6.0; 10],
+            },
+        );
+
+        // Both set — should still process without error (parametric wins)
+        let mut buffers = HashMap::new();
+        buffers.insert(id, test_buffer(0.5, 1024));
+        assert!(mixer.mix(&mut buffers).is_some());
+
+        // Clear parametric — graphic should take over
+        mixer.clear_source_effect(id, "eq");
+        let mut buffers = HashMap::new();
+        buffers.insert(id, test_buffer(0.5, 1024));
+        assert!(mixer.mix(&mut buffers).is_some());
+    }
+
+    #[test]
+    fn effect_toggle_clear_and_readd() {
+        let mut mixer = AudioMixer::new(AudioMixerConfig {
+            master_limiter: false,
+            ..Default::default()
+        });
+        let id = mixer.add_source(AudioSourceConfig::new("Toggle"));
+
+        // Add reverb, mix, clear, mix, re-add, mix
+        mixer.set_source_reverb(
+            id,
+            dsp::ReverbParams {
+                room_size: 0.8,
+                damping: 0.5,
+                mix: 0.5,
+            },
+        );
+        let mut buffers = HashMap::new();
+        buffers.insert(id, test_buffer(0.5, 1024));
+        assert!(mixer.mix(&mut buffers).is_some());
+
+        mixer.clear_source_effect(id, "reverb");
+        let mut buffers = HashMap::new();
+        buffers.insert(id, test_buffer(0.5, 1024));
+        assert!(mixer.mix(&mut buffers).is_some());
+
+        // Re-add with different params — should be fresh state
+        mixer.set_source_reverb(
+            id,
+            dsp::ReverbParams {
+                room_size: 0.3,
+                damping: 0.8,
+                mix: 0.2,
+            },
+        );
+        let mut buffers = HashMap::new();
+        buffers.insert(id, test_buffer(0.5, 1024));
+        let result = mixer.mix(&mut buffers).unwrap();
+        for &s in result.samples() {
+            assert!(!s.is_nan(), "re-added reverb produced NaN");
+        }
+    }
+
+    #[test]
+    fn compressor_reduces_loud_signal() {
+        let mut mixer = AudioMixer::new(AudioMixerConfig {
+            master_limiter: false,
+            ..Default::default()
+        });
+        let id = mixer.add_source(AudioSourceConfig::new("Comp Check"));
+        mixer.set_source_compressor(
+            id,
+            dsp::CompressorParams {
+                threshold_db: -20.0,
+                ratio: 8.0,
+                attack_ms: 0.1,
+                release_ms: 10.0,
+                makeup_gain_db: 0.0,
+                knee_db: 0.0,
+                mix: 1.0,
+            },
+        );
+
+        // Run several cycles so compressor converges
+        let mut last_peak = 0.0_f32;
+        for _ in 0..10 {
+            let mut buffers = HashMap::new();
+            buffers.insert(id, test_buffer(0.9, 1024));
+            let result = mixer.mix(&mut buffers).unwrap();
+            last_peak = result.peak();
+        }
+        // 0.9 input → after pan (~0.636) → above -20dB threshold → compressed
+        // Should be measurably less than uncompressed peak
+        assert!(
+            last_peak < 0.7,
+            "compressor should reduce peak, got {last_peak}"
+        );
+    }
+
+    #[test]
+    fn delay_feedback_clamped() {
+        let mut mixer = AudioMixer::new(AudioMixerConfig {
+            master_limiter: false,
+            ..Default::default()
+        });
+        let id = mixer.add_source(AudioSourceConfig::new("Delay Clamp"));
+        // feedback > 1.0 should be clamped to 0.95
+        mixer.set_source_delay(id, 10.0, 5.0, 0.5);
+
+        let mut buffers = HashMap::new();
+        buffers.insert(id, test_buffer(0.5, 1024));
+        let result = mixer.mix(&mut buffers).unwrap();
+        // Should not blow up despite extreme feedback input
+        assert!(
+            result.peak() < 2.0,
+            "clamped feedback should prevent blowup"
+        );
+    }
+
+    #[test]
+    fn master_gain_applied() {
+        let mut mixer = AudioMixer::new(AudioMixerConfig {
+            master_limiter: false,
+            master_gain_db: -6.0,
+            ..Default::default()
+        });
+        let id = mixer.add_source(AudioSourceConfig::new("Src"));
+
+        let mut buffers = HashMap::new();
+        buffers.insert(id, test_buffer(0.8, 1024));
+        let result = mixer.mix(&mut buffers).unwrap();
+        let peak = result.peak();
+        // -6dB master gain should attenuate to ~half, plus pan factor
+        assert!(peak < 0.5, "master gain should attenuate, peak={peak}");
+    }
+
+    #[test]
+    fn clear_all_effect_types() {
+        let mut mixer = AudioMixer::new(AudioMixerConfig::default());
+        let id = mixer.add_source(AudioSourceConfig::new("AllFx"));
+
+        // Set all effects
+        mixer.set_source_noise_gate(id, 0.01);
+        mixer.set_source_eq(
+            id,
+            vec![dsp::EqBandConfig {
+                band_type: dsp::BandType::HighPass,
+                freq_hz: 80.0,
+                gain_db: 0.0,
+                q: 0.707,
+                enabled: true,
+            }],
+        );
+        mixer.set_source_graphic_eq(
+            id,
+            dsp::GraphicEqSettings {
+                enabled: true,
+                bands: [0.0; 10],
+            },
+        );
+        mixer.set_source_compressor(
+            id,
+            dsp::CompressorParams {
+                threshold_db: -20.0,
+                ratio: 4.0,
+                attack_ms: 5.0,
+                release_ms: 50.0,
+                makeup_gain_db: 0.0,
+                knee_db: 0.0,
+                mix: 1.0,
+            },
+        );
+        mixer.set_source_deesser(
+            id,
+            dsp::DeEsserParams {
+                freq_hz: 6000.0,
+                threshold_db: -20.0,
+                reduction_db: 6.0,
+                q: 1.0,
+            },
+        );
+        mixer.set_source_delay(id, 10.0, 0.2, 0.3);
+        mixer.set_source_reverb(
+            id,
+            dsp::ReverbParams {
+                room_size: 0.5,
+                damping: 0.5,
+                mix: 0.2,
+            },
+        );
+
+        // Clear all individually
+        for effect in &[
+            "noise_gate",
+            "eq",
+            "graphic_eq",
+            "compressor",
+            "deesser",
+            "delay",
+            "reverb",
+        ] {
+            assert!(
+                mixer.clear_source_effect(id, effect),
+                "clearing {effect} should succeed"
+            );
+        }
+
+        // Mix should still work with all effects cleared
+        let mut buffers = HashMap::new();
+        buffers.insert(id, test_buffer(0.5, 1024));
+        assert!(mixer.mix(&mut buffers).is_some());
     }
 }

@@ -58,6 +58,7 @@ impl AudioNode for InputNode {
         1
     }
 
+    #[inline]
     fn process(&mut self, _inputs: &[&AudioBuffer], output: &mut AudioBuffer) {
         if let Some(buf) = self.buffer.take() {
             *output = buf;
@@ -97,6 +98,7 @@ impl AudioNode for GainNode {
         1
     }
 
+    #[inline]
     fn process(&mut self, inputs: &[&AudioBuffer], output: &mut AudioBuffer) {
         if let Some(input) = inputs.first() {
             *output = (*input).clone();
@@ -124,6 +126,7 @@ impl AudioNode for MixerNode {
         1
     }
 
+    #[inline]
     fn process(&mut self, inputs: &[&AudioBuffer], output: &mut AudioBuffer) {
         if inputs.is_empty() {
             return;
@@ -182,6 +185,7 @@ impl AudioNode for DspChainNode {
         1
     }
 
+    #[inline]
     fn process(&mut self, inputs: &[&AudioBuffer], output: &mut AudioBuffer) {
         if let Some(input) = inputs.first() {
             *output = (*input).clone();
@@ -192,6 +196,9 @@ impl AudioNode for DspChainNode {
                 comp.process(output);
             }
             self.panner.process(output);
+            for sample in output.samples_mut() {
+                *sample = dhvani::dsp::sanitize_sample(*sample);
+            }
         }
     }
 }
@@ -251,6 +258,7 @@ impl AudioNode for MasterNode {
         1
     }
 
+    #[inline]
     fn process(&mut self, inputs: &[&AudioBuffer], output: &mut AudioBuffer) {
         if let Some(input) = inputs.first() {
             *output = (*input).clone();
@@ -258,6 +266,9 @@ impl AudioNode for MasterNode {
                 limiter.process(output);
             }
             self.meter.process(output);
+            for sample in output.samples_mut() {
+                *sample = dhvani::dsp::sanitize_sample(*sample);
+            }
         }
     }
 }
@@ -333,6 +344,20 @@ impl AudioPipeline {
 
         self.dirty = true;
         self.compile_and_swap();
+        tracing::debug!(source_id = %id, gain, pan, "audio pipeline: source added");
+    }
+
+    /// Update gain and pan for an existing source.
+    pub fn update_source(&mut self, id: AudioSourceId, gain: f32, pan: f32) -> bool {
+        if let Some(nodes) = self.source_nodes.get_mut(&id) {
+            nodes.gain_value = gain;
+            nodes.pan_value = pan;
+            self.dirty = true;
+            self.compile_and_swap();
+            true
+        } else {
+            false
+        }
     }
 
     /// Remove a source from the pipeline.
@@ -341,6 +366,7 @@ impl AudioPipeline {
             self.source_meters.remove(&id);
             self.dirty = true;
             self.compile_and_swap();
+            tracing::debug!(source_id = %id, "audio pipeline: source removed");
             true
         } else {
             false
@@ -372,10 +398,15 @@ impl AudioPipeline {
         }
 
         // compile() consumes the Graph — that's fine, we rebuild each time.
-        if let Ok(plan) = graph.compile() {
-            let handle = self.processor.swap_handle();
-            handle.swap(plan);
-            self.dirty = false;
+        match graph.compile() {
+            Ok(plan) => {
+                let handle = self.processor.swap_handle();
+                handle.swap(plan);
+                self.dirty = false;
+            }
+            Err(e) => {
+                tracing::error!("audio graph compilation failed: {e}");
+            }
         }
     }
 
@@ -383,6 +414,7 @@ impl AudioPipeline {
     ///
     /// Source input buffers should be fed into the graph's input nodes
     /// before calling this. Returns the master output buffer.
+    #[must_use]
     pub fn process(&mut self) -> Option<AudioBuffer> {
         self.processor.process().cloned()
     }
