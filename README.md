@@ -62,7 +62,7 @@ See [docs/architecture/overview.md](docs/architecture/overview.md) for the full 
 
 ```toml
 [dependencies]
-aethersafta = "0.20"
+aethersafta = "0.23"
 ```
 
 ```rust
@@ -115,7 +115,7 @@ To include only specific features:
 
 ```toml
 [dependencies]
-aethersafta = { version = "0.20", default-features = false, features = ["hwaccel"] }
+aethersafta = { version = "0.23", default-features = false, features = ["hwaccel"] }
 ```
 
 ---
@@ -205,12 +205,13 @@ println!("Headroom: {} µs", budget.headroom_us());
 
 ## Dependencies
 
-| Crate | Role |
-|-------|------|
-| [tarang](https://crates.io/crates/tarang) | Video/audio encoding, container muxing (MP4/MKV/WebM). 18-33x faster than GStreamer for video operations |
-| [ai-hwaccel](https://crates.io/crates/ai-hwaccel) | Hardware encoder detection across 13 accelerator families (NVENC, VA-API, QSV, AMF, and more) |
-| [pipewire](https://crates.io/crates/pipewire) | Audio capture from system audio graph |
-| [tokio](https://crates.io/crates/tokio) | Async runtime for concurrent capture + encode + output |
+| Crate | Version | Role |
+|-------|---------|------|
+| [ranga](https://crates.io/crates/ranga) | 0.21.4 | Image processing, color conversion, blending, pixel format interchange |
+| [tarang](https://crates.io/crates/tarang) | 0.21.3 | Video/audio encoding, container muxing (MP4/MKV/WebM) |
+| [dhvani](https://crates.io/crates/dhvani) | 0.22.4 | Audio DSP, capture, mixing, metering, graph-based routing |
+| [ai-hwaccel](https://crates.io/crates/ai-hwaccel) | 0.23.3 | Hardware encoder detection across 13 accelerator families |
+| [tokio](https://crates.io/crates/tokio) | 1 | Async runtime for concurrent capture + encode + output |
 
 ---
 
@@ -228,16 +229,7 @@ println!("Headroom: {} µs", budget.headroom_us());
 
 ## Roadmap
 
-| Version | Milestone | Key features |
-|---------|-----------|--------------|
-| **0.20.3** | Core compositing + hardening | Scene graph, compositor, H.264 encode, SSE2 SIMD, code audit, perf optimization |
-| **0.6.0** | Multi-source & HW encode | Concurrent capture, V4L2 cameras, NVENC/VA-API/QSV via ai-hwaccel |
-| **0.7.0** | Overlays & scene switching | Text/image overlays, transitions (cut/fade/slide), scene presets, IPC |
-| **0.8.0** | Streaming output | RTMP (Twitch/YouTube), SRT low-latency, multi-output |
-| **0.9.0** | Audio DSP & performance | Noise gate, compressor, EQ, zero-copy frames, GPU compositing |
-| **1.0.0** | Stable API | Frozen traits, 90%+ coverage, production-tested, semver-checks in CI |
-
-Full details: [docs/development/roadmap.md](docs/development/roadmap.md)
+See [docs/development/roadmap.md](docs/development/roadmap.md) for the full roadmap with per-version milestones, delegation notes, and 1.0 criteria.
 
 ---
 

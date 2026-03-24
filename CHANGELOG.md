@@ -7,6 +7,51 @@ Pre-1.0 versioning uses `0.D.M` (day.month) SemVer.
 
 ---
 
+## [0.23.3] — 2026-03-23
+
+Audit and hardening release: ecosystem dependency upgrades, security fixes, performance optimization of color conversion hot paths, and project-wide annotation sweep.
+
+### Security
+
+- **Integer overflow in compositor ClipRect** — layer position + size arithmetic now uses i64 to prevent overflow that could cause out-of-bounds writes with crafted layer positions
+- **Opacity threshold fix** — corrected the fully-opaque fast path threshold from 255 to 256 (fixed-point Q8), preventing layers at 99.6% opacity from skipping alpha blending
+- **Opacity clamping** — layer opacity values are now clamped to `0.0..=1.0` at entry points, preventing undefined behavior from NaN or negative opacity values
+
+### Performance
+
+- **Single-pass color conversions** — `argb_to_yuv420p`, `argb_to_nv12`, and `nv12_to_argb` rewritten as direct single-pass implementations operating on `&[u8]` slices, eliminating intermediate buffer copies and format conversions through ranga
+  - `argb_to_yuv420p` 1080p: 13.5ms → 4.1ms (**-69%**)
+  - `argb_to_nv12` 720p: 3.4ms → 1.0ms (**-70%**, was +20% regression from ranga delegation)
+  - `nv12_to_argb` 4K: 79.4ms → 34.7ms (**-56%**)
+  - NV12 roundtrip 1080p: 18.9ms → 11.6ms (**-39%**)
+- **Buffered file I/O** — `FileOutput` now wraps `File` in `BufWriter` with 256 KB buffer, reducing syscalls from one-per-packet to amortized batches
+- **Box large enum variant** — `EncoderInner::OpenH264` boxed to reduce enum size from 7352 to 144 bytes
+
+### Fixed
+
+- **Audio graph gain/pan ignored** — `AudioPipeline::add_source()` now stores and applies the gain and pan parameters instead of silently discarding them
+- **FrameClock u32 truncation** — `is_behind()` arithmetic widened from u32 to u64, preventing wrap-around after ~39.7 hours at 30fps
+- **Mp4Output corrupt on drop** — added `Drop` impl that calls `finalize()` as a safety net, preventing corrupt MP4 files (missing moov atom) when dropped without explicit finalize
+- **CompressorParams missing field** — added `mix: 1.0` to all `CompressorParams` literals for dhvani 0.22.4 compatibility
+
+### Added
+
+- **`#[non_exhaustive]`** on all 7 public enums: `LayerContent`, `VideoCodec`, `EncoderBackend`, `OutputConfig`, `SourceConfig`, `PixelFormat`, `Pattern`
+- **`#[must_use]`** on 61 pure functions across all modules
+- **`#[inline]`** on hot-path functions: `ClipRect::compute`, `blend_color_fill`, `blend_frame`, `blend_row_alpha`, `make_video_frame`, `make_packet`, color conversion functions
+
+### Dependencies
+
+| Crate | Old | New |
+|-------|-----|-----|
+| ai-hwaccel | 0.21.3 | 0.23.3 |
+| dhvani | 0.21.4 | 0.22.4 |
+| criterion | 0.5 | 0.8 |
+
+New transitive dependency: `abaco` 0.22.4 (shared DSP math, via dhvani).
+
+---
+
 ## [0.21.3] — 2026-03-21
 
 Hardening release: project infrastructure, deeper crate integration, expanded test and benchmark coverage.

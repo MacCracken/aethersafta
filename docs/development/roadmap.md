@@ -12,8 +12,8 @@ Aethersafta delegates low-level media work to sibling crates:
 |-------|---------|------|-----------------|
 | [ranga](https://crates.io/crates/ranga) | 0.21.4 | Image processing, color conversion, blending, filters | `blend`, `convert`, `filter`, `transform`, `composite`, `histogram` |
 | [tarang](https://crates.io/crates/tarang) | 0.21.3 | Media encoding/decoding, container muxing/demuxing | `audio`, `video`, `demux`, `core` |
-| [dhvani](https://crates.io/crates/dhvani) | 0.21.4 | Audio DSP, capture, mixing, metering, MIDI | `dsp`, `capture`, `buffer`, `clock`, `meter`, `graph` |
-| [ai-hwaccel](https://crates.io/crates/ai-hwaccel) | 0.21.3 | Hardware accelerator detection, disk-cached registry | encoder selection, fallback logic |
+| [dhvani](https://crates.io/crates/dhvani) | 0.22.4 | Audio DSP, capture, mixing, metering, MIDI | `dsp`, `capture`, `buffer`, `clock`, `meter`, `graph` |
+| [ai-hwaccel](https://crates.io/crates/ai-hwaccel) | 0.23.3 | Hardware accelerator detection, disk-cached registry | encoder selection, fallback logic |
 
 Items handled by these crates are noted inline. Aethersafta's scope is **orchestration**: scene graph, source management, pipeline plumbing, transport protocols, and CLI/IPC.
 
