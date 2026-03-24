@@ -5,6 +5,8 @@
 //! the output buffer.
 
 pub mod compositor;
+#[cfg(feature = "gpu")]
+pub mod gpu_compositor;
 
 use std::fmt;
 

@@ -14,7 +14,7 @@
 //! Scene Graph (layers with z-order, transforms, opacity)
 //!     │
 //!     ▼
-//! Compositor (alpha blend, crop, scale → composited frame via ranga)
+//! Compositor (alpha blend, crop, scale → composited frame via ranga / soorat GPU)
 //!     │
 //!     ▼                                    Audio Sources (PipeWire via dhvani)
 //! Encode Pipeline                              │
@@ -53,6 +53,8 @@ pub use output::file::FileOutput;
 pub use output::mp4::Mp4Output;
 pub use output::{OutputConfig, OutputSink};
 pub use scene::compositor::Compositor;
+#[cfg(feature = "gpu")]
+pub use scene::gpu_compositor::GpuCompositor;
 pub use scene::{Layer, LayerId, SceneGraph};
 pub use source::image::ImageSource;
 pub use source::synthetic::SyntheticSource;

@@ -1,6 +1,6 @@
 [package]
 name = "aethersafta"
-version = "0.24.3"
+version = "0.24.4"
 edition = "2024"
 rust-version = "1.89"
 license = "AGPL-3.0-only"
@@ -13,7 +13,9 @@ categories = ["multimedia", "multimedia::video", "multimedia::encoding"]
 
 [features]
 default = ["pipewire", "hwaccel"]
-full = ["pipewire", "hwaccel", "rtmp", "srt", "openh264-enc", "vaapi"]
+full = ["pipewire", "hwaccel", "rtmp", "srt", "openh264-enc", "vaapi", "gpu"]
+# GPU-accelerated compositing via soorat
+gpu = ["dep:soorat", "dep:wgpu", "dep:pollster"]
 # Audio capture and processing via dhvani
 pipewire = ["dhvani/pipewire"]
 # Hardware-accelerated encoding (NVENC, VA-API, QSV, AMF)
@@ -58,6 +60,11 @@ ai-hwaccel = { version = "0.23.3", optional = true, default-features = false }
 
 # Audio capture, mixing, DSP, metering
 dhvani = { version = "0.22.4", default-features = false, features = ["dsp", "graph"] }
+
+# GPU-accelerated compositing (optional — soorat rendering engine)
+soorat = { path = "../soorat", optional = true }
+wgpu = { version = "24", optional = true }
+pollster = { version = "0.4", optional = true }
 
 [dev-dependencies]
 tempfile = "3"
