@@ -19,81 +19,48 @@ Items handled by these crates are noted inline. Aethersafta's scope is **orchest
 
 ---
 
-## v0.21.3 — Core Compositing + Hardening
+## v0.23.3 — Hardening (current)
 
-Code quality, correctness, and performance passes before expanding scope.
-
-### Project infrastructure (adopted from tarang/ai-hwaccel)
-
-Done in v0.21.3 except ADRs.
-
-- [x] LICENSE file (AGPL-3.0-only)
-- [x] CONTRIBUTING.md
-- [x] CODE_OF_CONDUCT.md (Contributor Covenant 2.1)
-- [x] SECURITY.md
-- [x] CI: doc verification job
-- [x] CI: `cargo-semver-checks`
-- [x] CI: `cargo-vet` supply chain auditing
-- [x] CI: coverage threshold enforcement (85%+)
-- [x] CI: fuzz job on main pushes (30s per target)
-- [x] `codecov.yml` (project 85%, patch 80%)
-- [x] Example binaries: `examples/compose.rs`, `examples/encode.rs`, `examples/record.rs`
-- [ ] Architecture Decision Records (`docs/decisions/`) for key choices (ARGB vs NV12 internal format, SSE2 vs portable SIMD, tarang vs direct FFI)
-
-### Code audit (3–5 rounds)
-
-Each round: read every module, fix issues found, run full CI.
+### Code audit
 
 - [ ] Round 1: `unsafe` review — verify all SIMD/FFI blocks, add `// SAFETY:` comments, fuzz edge cases (zero-size frames, odd dimensions, empty scenes)
-- [ ] Round 2: Error handling — replace `unwrap()`/`expect()` in non-test code with proper `Result` propagation, add error context with `anyhow::Context`
-- [ ] Round 3: API surface — audit public types for consistency (naming, builder patterns, `#[must_use]`), ensure `Send`/`Sync` bounds are correct, review serde representations, add `#[serde(deny_unknown_fields)]` where appropriate
-- [ ] Round 4: Bounds & overflow — check all `as` casts for truncation, verify clip rect arithmetic with `i32::MAX`/`u32::MAX` inputs, add property-based tests (proptest)
+- [ ] Round 2: Error handling — replace remaining `expect()` in non-test code with proper `Result` propagation, add error context with `anyhow::Context`
 - [ ] Round 5: Dependency hygiene — remove unused deps, minimize feature flags, audit transitive `unsafe` with `cargo-geiger`, finalize `cargo-vet` supply chain
+- [ ] Architecture Decision Records (`docs/decisions/`) for key choices (ARGB vs NV12 internal format, SSE2 vs portable SIMD, tarang vs direct FFI)
+
+### Audit fixes
+
+- [ ] `clear_source_effect` string API → `SourceEffect` enum with `#[non_exhaustive]`
+- [ ] Port 5 DSP effects (noise gate, de-esser, graphic EQ, reverb, delay) to graph pipeline `DspChainNode`
+- [ ] Activate `BufferPool` in mixer `mix()` — promote `to_mix`/`refs` to struct fields, eliminate per-cycle Vec allocations
+- [ ] Fix graph `source_meters` — call `.process()` on `PeakMeter` during graph execution, or remove dead metering
+- [ ] Compositor per-frame buffer reuse — accept `&mut Vec<u8>` scratch or store reusable buffer on `Compositor`
 
 ### Performance & memory optimization
 
-Each round: profile, optimize hotspot, benchmark before/after.
-
-- [ ] Round 1: Allocations — profile with DHAT, eliminate per-frame `Vec` allocations in compositor (reuse output buffer), pool `RawFrame` buffers
-- [ ] Round 2: Encode pipeline — avoid redundant format conversions when ranga already provides the target format, direct NV12 compositing path for single-layer capture
+- [ ] Round 1: Allocations — profile with DHAT, pool `RawFrame` buffers, eliminate per-frame allocations
 - [ ] Round 3: Cache & prefetch — optimize memory access patterns for L2 cache locality, benchmark with `perf stat` for cache miss rates
 
 > **Delegated to ranga**: SIMD color conversion (`ranga::convert`), SIMD scaled blending (`ranga::blend` + `ranga::transform`), pixel format interchange.
 
 ### Benchmarking infrastructure
 
-Partially done in v0.21.3 — baselines established, multi-layer and audio benchmarks added.
-
-- [x] Establish v0.21.3 baselines as golden numbers in `docs/development/performance.md`
 - [ ] Benchmark regression CI gate (fail on >10% regression from baseline)
-- [x] Add end-to-end pipeline benchmark: source → composite → encode → file (in `benches/encode.rs`)
-- [x] Add multi-layer benchmark matrix: 1/3/5 layers at 1080p, multi-scaled 2/4 layers (in `benches/compose.rs`)
 - [ ] Add memory benchmark: peak RSS during 10s recording at 1080p30
 - [ ] Latency percentile tracking: p50/p95/p99 per-frame times over 1000-frame runs
-- [x] HTML benchmark dashboard via criterion (auto-generated in `target/criterion/`)
 - [ ] Compare across feature configs: `--no-default-features` vs `--features openh264-enc` vs `--features full`
 
 ### Testing hardening
 
-Partially done in v0.21.3 — 122 tests, integration tests added.
-
 - [ ] Fuzz targets: scene graph composition, frame validation (`fuzz/` crate with libfuzzer-sys)
 - [ ] Property-based tests for compositor (proptest: random layers, positions, opacities, dimensions)
 - [ ] Roundtrip tests: encode → decode → pixel comparison (via tarang)
-- [ ] Coverage target: 85%+ line coverage
-- [x] Integration tests: multi-source composition, BT.709 validation, audio mixer, error recovery, edge cases (122 tests total)
 
 > **Delegated to ranga**: NV12/YUV conversion fuzzing, ARGB frame validation. **Delegated to tarang**: encode/decode roundtrip codec coverage.
 
-### Remaining from core compositing
-
-Deferred to v0.22.0:
-- [ ] Screen capture via Wayland `wlr-screencopy-unstable-v1` protocol
-- [ ] Media file source (video playback via tarang decode)
-
 ---
 
-## v0.22.0 — Multi-Source & Capture
+## v0.24.0 — Multi-Source & Capture
 
 ### Multi-source capture
 - [ ] Concurrent capture from multiple sources (screen + camera + media)
@@ -105,19 +72,15 @@ Deferred to v0.22.0:
 - [ ] Device enumeration and capability querying
 - [ ] Auto-detect resolution, framerate, pixel format
 
-### Audio capture integration
-
-Done in v0.21.3.
-
-- [x] Integrate dhvani PipeWire capture (`dhvani::capture`) for system audio, mic, per-app — `AudioCaptureManager`
-- [x] Per-source volume control via `dhvani::buffer` mixing + `dhvani::meter` — per-source `LevelMeter`, `GainSmoother`
-- [x] Audio mixer graph via `dhvani::graph` — `AudioPipeline` with node-based routing
+### Screen & media capture
+- [ ] Screen capture via Wayland `wlr-screencopy-unstable-v1` protocol
+- [ ] Media file source (video playback via tarang decode)
 
 > **Delegated to tarang**: Hardware-accelerated encoding (NVENC, VA-API, QSV) — aethersafta selects encoder via `ai-hwaccel` and passes frames to tarang. **Delegated to dhvani**: PipeWire capture, audio mixing, metering.
 
 ---
 
-## v0.23.0 — Overlays, Transitions & Scene Switching
+## v0.25.0 — Overlays, Transitions & Scene Switching
 
 ### Overlays
 - [ ] Text overlay with font rendering (position, size, color, background)
@@ -147,7 +110,7 @@ Done in v0.21.3.
 
 ---
 
-## v0.24.0 — Streaming Output
+## v0.26.0 — Streaming Output
 
 ### RTMP output
 - [ ] RTMP client (connect to Twitch, YouTube, custom)
@@ -166,24 +129,15 @@ Done in v0.21.3.
 
 ---
 
-## v0.25.0 — Audio DSP Integration & Latency
-
-### Audio DSP integration
-
-> **Delegated to dhvani**: All DSP effects live in `dhvani::dsp`. Aethersafta integrates them into the audio pipeline via `dhvani::graph`.
-
-- [x] Integrate `dhvani::dsp` effects (compressor, parametric EQ, limiter) into per-source audio chain — done in v0.21.3
-- [ ] Noise gate via dhvani compressor/limiter with threshold config
-- [ ] Noise suppression (RNNoise or similar — not yet in dhvani, may need new crate or dhvani feature)
+## v0.27.0 — Latency & Performance
 
 ### Latency tracking
-- [ ] Per-stage timing: capture → composite → encode → output
-- [ ] `LatencyBudget` with configurable target (e.g. 33ms for 30fps)
 - [ ] A/V sync via `dhvani::clock` PTS alignment
 - [ ] Alert when pipeline exceeds budget
 - [ ] Nazar integration for monitoring dashboard
 
 ### Performance
+- [ ] Noise suppression (RNNoise or similar — not yet in dhvani, may need new crate or dhvani feature)
 - [ ] Zero-copy frame path (compositor → encoder without memcpy)
 - [ ] GPU-accelerated compositing via wgpu compute (leverage `ranga` gpu feature)
 - [ ] Memory pool for frame buffers (eliminate per-frame allocation)

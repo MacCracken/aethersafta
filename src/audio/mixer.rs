@@ -11,7 +11,7 @@ use dhvani::meter::LevelMeter;
 use tracing;
 use uuid::Uuid;
 
-use super::{AudioMixerConfig, AudioSourceConfig, AudioSourceEntry, AudioSourceId};
+use super::{AudioMixerConfig, AudioSourceConfig, AudioSourceEntry, AudioSourceId, SourceEffect};
 
 /// Per-source DSP state (stateful effects that need to persist across buffers).
 struct SourceDsp {
@@ -39,6 +39,8 @@ pub struct AudioMixer {
     master_meter: LevelMeter,
     #[allow(dead_code)] // Used for RT allocation pooling in future mix() optimization
     buffer_pool: BufferPool,
+    /// Reusable scratch vec for collecting buffers to mix (avoids per-cycle alloc).
+    mix_scratch: Vec<AudioBuffer>,
 }
 
 impl AudioMixer {
@@ -65,6 +67,7 @@ impl AudioMixer {
             source_dsp: HashMap::new(),
             master_limiter,
             buffer_pool,
+            mix_scratch: Vec::new(),
         }
     }
 
@@ -233,20 +236,17 @@ impl AudioMixer {
         }
     }
 
-    /// Disable a specific per-source effect. Pass the effect name:
-    /// `"compressor"`, `"eq"`, `"graphic_eq"`, `"deesser"`, `"reverb"`,
-    /// `"delay"`, `"noise_gate"`.
-    pub fn clear_source_effect(&mut self, id: AudioSourceId, effect: &str) -> bool {
+    /// Disable a specific per-source DSP effect.
+    pub fn clear_source_effect(&mut self, id: AudioSourceId, effect: SourceEffect) -> bool {
         if let Some(dsp_state) = self.source_dsp.get_mut(&id) {
             match effect {
-                "compressor" => dsp_state.compressor = None,
-                "eq" => dsp_state.eq = None,
-                "graphic_eq" => dsp_state.graphic_eq = None,
-                "deesser" => dsp_state.deesser = None,
-                "reverb" => dsp_state.reverb = None,
-                "delay" => dsp_state.delay = None,
-                "noise_gate" => dsp_state.noise_gate_threshold = None,
-                _ => return false,
+                SourceEffect::Compressor => dsp_state.compressor = None,
+                SourceEffect::Eq => dsp_state.eq = None,
+                SourceEffect::GraphicEq => dsp_state.graphic_eq = None,
+                SourceEffect::DeEsser => dsp_state.deesser = None,
+                SourceEffect::Reverb => dsp_state.reverb = None,
+                SourceEffect::Delay => dsp_state.delay = None,
+                SourceEffect::NoiseGate => dsp_state.noise_gate_threshold = None,
             }
             true
         } else {
@@ -316,7 +316,7 @@ impl AudioMixer {
         &mut self,
         source_buffers: &mut HashMap<AudioSourceId, AudioBuffer>,
     ) -> Option<AudioBuffer> {
-        let mut to_mix: Vec<AudioBuffer> = Vec::new();
+        self.mix_scratch.clear();
 
         for entry in &self.sources {
             if entry.config.muted {
@@ -381,15 +381,15 @@ impl AudioMixer {
                 dsp_state.meter.process(&buf);
             }
 
-            to_mix.push(buf);
+            self.mix_scratch.push(buf);
         }
 
-        if to_mix.is_empty() {
+        if self.mix_scratch.is_empty() {
             return None;
         }
 
         // Mix all sources
-        let refs: Vec<&AudioBuffer> = to_mix.iter().collect();
+        let refs: Vec<&AudioBuffer> = self.mix_scratch.iter().collect();
         let mut mixed = dhvani::buffer::mix(&refs).ok()?;
 
         // Master gain
@@ -925,9 +925,8 @@ mod tests {
         });
         let id = mixer.add_source(AudioSourceConfig::new("Fx"));
         mixer.set_source_noise_gate(id, 0.1);
-        assert!(mixer.clear_source_effect(id, "noise_gate"));
-        assert!(!mixer.clear_source_effect(id, "nonexistent"));
-        assert!(!mixer.clear_source_effect(Uuid::new_v4(), "noise_gate"));
+        assert!(mixer.clear_source_effect(id, SourceEffect::NoiseGate));
+        assert!(!mixer.clear_source_effect(Uuid::new_v4(), SourceEffect::NoiseGate));
     }
 
     #[test]
@@ -1051,7 +1050,7 @@ mod tests {
         assert!(mixer.mix(&mut buffers).is_some());
 
         // Clear parametric — graphic should take over
-        mixer.clear_source_effect(id, "eq");
+        mixer.clear_source_effect(id, SourceEffect::Eq);
         let mut buffers = HashMap::new();
         buffers.insert(id, test_buffer(0.5, 1024));
         assert!(mixer.mix(&mut buffers).is_some());
@@ -1078,7 +1077,7 @@ mod tests {
         buffers.insert(id, test_buffer(0.5, 1024));
         assert!(mixer.mix(&mut buffers).is_some());
 
-        mixer.clear_source_effect(id, "reverb");
+        mixer.clear_source_effect(id, SourceEffect::Reverb);
         let mut buffers = HashMap::new();
         buffers.insert(id, test_buffer(0.5, 1024));
         assert!(mixer.mix(&mut buffers).is_some());
@@ -1230,17 +1229,17 @@ mod tests {
 
         // Clear all individually
         for effect in &[
-            "noise_gate",
-            "eq",
-            "graphic_eq",
-            "compressor",
-            "deesser",
-            "delay",
-            "reverb",
+            SourceEffect::NoiseGate,
+            SourceEffect::Eq,
+            SourceEffect::GraphicEq,
+            SourceEffect::Compressor,
+            SourceEffect::DeEsser,
+            SourceEffect::Delay,
+            SourceEffect::Reverb,
         ] {
             assert!(
-                mixer.clear_source_effect(id, effect),
-                "clearing {effect} should succeed"
+                mixer.clear_source_effect(id, *effect),
+                "clearing {effect:?} should succeed"
             );
         }
 

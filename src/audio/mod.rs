@@ -101,6 +101,26 @@ impl Default for AudioMixerConfig {
     }
 }
 
+/// Per-source DSP effect type, used with [`AudioMixer::clear_source_effect`].
+#[non_exhaustive]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum SourceEffect {
+    /// Parametric EQ.
+    Eq,
+    /// 10-band graphic EQ.
+    GraphicEq,
+    /// Dynamic range compressor.
+    Compressor,
+    /// Sibilance reduction.
+    DeEsser,
+    /// Reverb (Schroeder/Freeverb).
+    Reverb,
+    /// Fixed delay with feedback.
+    Delay,
+    /// Noise gate (amplitude threshold).
+    NoiseGate,
+}
+
 /// A managed audio source with its ID and configuration.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AudioSourceEntry {
