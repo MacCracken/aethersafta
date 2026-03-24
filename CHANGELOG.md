@@ -9,7 +9,11 @@ Pre-1.0 versioning uses `0.D.M` (day.month) SemVer.
 
 ## [0.24.3] — 2026-03-24
 
-Code audit and scaffold hardening release: full DSP chain in graph pipeline, compositor buffer reuse, dependency cleanup, and Architecture Decision Records.
+Code audit and scaffold hardening release: full DSP chain in graph pipeline, compositor buffer reuse, dependency cleanup, Architecture Decision Records, and comprehensive benchmark expansion.
+
+### Breaking (downstream note)
+
+- **`RawFrame.data` is now `bytes::Bytes` instead of `Vec<u8>`** — enables O(1) clone for static sources (e.g. `ImageSource`). Downstream code that writes to `frame.data` directly must call `.to_vec()` first. Read access via indexing/slicing is unchanged (`Bytes` derefs to `[u8]`). `Compositor::reclaim_buffer()` now accepts `Bytes` and recovers the underlying `Vec` when possible.
 
 ### Changed
 
@@ -17,7 +21,18 @@ Code audit and scaffold hardening release: full DSP chain in graph pipeline, com
 - **Graph source metering fixed** — per-source `PeakMeter` is now wired into graph execution via `Arc` sharing between `DspChainNode` and `AudioPipeline`, so `source_peak()` returns live values instead of always-zero
 - **BufferPool activated in mixer** — removed `#[allow(dead_code)]`, processed buffers are returned to the pool after mixing for reuse; public `acquire_buffer()`/`release_buffer()` API for callers to participate in pool allocation
 - **Compositor buffer reuse** — `Compositor` now stores a reusable scratch buffer; `compose()` takes `&mut self` and reuses the buffer across frames via `reclaim_buffer()` to eliminate per-frame heap allocation
+- **NV12/ARGB conversions unified to BT.709** — `argb_to_nv12` and `nv12_to_argb` now use BT.709 coefficients (matching `argb_to_yuv420p`), correct for HD video. Previously used BT.601.
 - **`serde_json` moved to dev-dependencies** — only used in tests, not library code
+- **Compositor hot path** — `visible_layers()` Vec allocation replaced with inline iterator; `#[inline]` added to `RawFrame::expected_size`, `expected_size_for`, `is_valid`
+- **Audio delay params** — out-of-range values now log via `tracing::debug!` when clamped
+
+### Fixed
+
+- **`SyntheticSource` division by zero** — `fps=0` no longer panics in `capture_frame()` (guarded with `.max(1)`)
+- **`parse_hex_color` UTF-8 panic** — CLI color parsing now filters to ASCII hex digits before slicing, preventing panic on multi-byte input
+- **Preview frame count** — `cmd_preview` now reports correct frame count when `--frames 0` (was reporting 0 instead of actual)
+- **Buffer reclaim wired in CLI** — both `cmd_record` and `cmd_preview` now call `compositor.reclaim_buffer()` after each frame, eliminating ~8MB/frame allocation at 1080p
+- **`SceneGraph::new` validation** — debug-asserts that width, height, and fps are non-zero
 
 ### Removed
 
@@ -32,12 +47,23 @@ Code audit and scaffold hardening release: full DSP chain in graph pipeline, com
   - ADR-001: ARGB8888 as internal pixel format (vs NV12)
   - ADR-002: SIMD delegation to ranga (vs inline intrinsics)
   - ADR-003: tarang for encoding (vs direct FFI)
+- **Property-based tests** — `proptest` for compositor: random layers/positions/opacities never panic, hidden/zero-opacity invariants, opaque fill coverage
+- **Fuzz targets** — `fuzz/` crate with `libfuzzer-sys`: `fuzz_compose` (random scene graphs), `fuzz_frame_validation` (arbitrary frame data), `fuzz_color_convert` (YUV/NV12 roundtrip)
+- **Benchmark expansion** — 7 bench targets, 36 functions:
+  - `compose`: buffer reclaim, opaque vs blend paths, resolution scaling (480p–4K), many color fills
+  - `audio`: graph pipeline (1/4/8 sources), buffer pool, mix buffer sizes (64–4096 frames)
+  - `convert`: YUV420p forward, odd dimensions (1x1 to 1921x1081)
+  - `output`: file write throughput (1KB–1MB), MP4 write throughput
+  - `latency`: p50/p95/p99 per-frame at 1080p30 (1000 frames)
+- **`scripts/bench-history.sh`** — runs all criterion benchmarks and appends results to `benchmarks/history.csv`
+- **Memory stability test** — 300 frames at 1080p30 with buffer reclaim, verifies no growth
 
 ### Dependencies
 
 | Crate | Old | New | Notes |
 |-------|-----|-----|-------|
 | ranga | 0.21.4 | 0.24.3 | GPU compute (GpuChain, transitions, geometry), Oklab/Oklch, BT.2020, perspective transforms, ICC profiles, histogram equalization, div255 precision fix, SIMD brightness/grayscale, cache-aware blur |
+| proptest | — | 1 | dev-dependency for property-based testing |
 
 ### Inherited Fixes (via ranga 0.24.3)
 
@@ -47,10 +73,20 @@ Code audit and scaffold hardening release: full DSP chain in graph pipeline, com
 - **Auto white balance** — clamped scale factors prevent extreme corrections
 - **NEON brightness OOB read** — fixed on aarch64
 
+### Latency Baseline (1080p30, 1 source + bg fill)
+
+| Metric | Compose | Full Pipeline |
+|--------|---------|---------------|
+| p50 | 3.4ms | 18.9ms |
+| p95 | 6.2ms | 24.6ms |
+| p99 | 6.4ms | 25.0ms |
+| Headroom | — | 8.3ms |
+
 ### Code Quality
 
 - **Zero `unsafe` in src/** — confirmed during audit, no `unsafe` blocks in library or binary code
 - **Zero `unwrap()`/`expect()` in library code** — confirmed during audit, all in test code only
+- **217 tests** (unit + integration + proptest + doc-tests)
 - **`cargo audit`** clean, **`cargo deny`** clean, **`cargo clippy`** clean
 - Removed `#[allow(dead_code)]` from graph node structs/impls (now used or annotated intentionally)
 
