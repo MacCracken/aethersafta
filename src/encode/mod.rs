@@ -359,9 +359,11 @@ pub fn argb_to_yuv420p(argb: &[u8], width: u32, height: u32) -> Vec<u8> {
     yuv
 }
 
-/// Convert an NV12 buffer to ARGB8888 using BT.601.
+/// Convert an NV12 buffer to ARGB8888 using BT.709.
 ///
-/// Single-pass direct conversion — no intermediate copies.
+/// BT.709 is correct for HD video (>= 720p). Single-pass, no intermediate copies.
+///
+/// Inverse of [`argb_to_nv12`].
 #[must_use]
 #[inline]
 pub fn nv12_to_argb(nv12: &[u8], width: u32, height: u32) -> Vec<u8> {
@@ -373,6 +375,10 @@ pub fn nv12_to_argb(nv12: &[u8], width: u32, height: u32) -> Vec<u8> {
     let uv_stride = cw * 2;
     let mut argb = vec![0u8; w * h * 4];
 
+    // BT.709 inverse:
+    //   R = Y + 1.5748 * Cr  ≈  Y + (403 * V) >> 8
+    //   G = Y - 0.1873 * Cb - 0.4681 * Cr  ≈  Y - (48 * U + 120 * V) >> 8
+    //   B = Y + 1.8556 * Cb  ≈  Y + (475 * U) >> 8
     for y in 0..h {
         let cy = (y / 2).min(ch.saturating_sub(1));
         for x in 0..w {
@@ -383,17 +389,19 @@ pub fn nv12_to_argb(nv12: &[u8], width: u32, height: u32) -> Vec<u8> {
             let v = nv12[uv_idx + 1] as i16 - 128;
             let oi = (y * w + x) * 4;
             argb[oi] = 255; // A
-            argb[oi + 1] = (yi + ((359 * v) >> 8)).clamp(0, 255) as u8; // R
-            argb[oi + 2] = (yi - ((88 * u + 183 * v) >> 8)).clamp(0, 255) as u8; // G
-            argb[oi + 3] = (yi + ((454 * u) >> 8)).clamp(0, 255) as u8; // B
+            argb[oi + 1] = (yi + ((403 * v) >> 8)).clamp(0, 255) as u8; // R
+            argb[oi + 2] = (yi - ((48 * u + 120 * v) >> 8)).clamp(0, 255) as u8; // G
+            argb[oi + 3] = (yi + ((475 * u) >> 8)).clamp(0, 255) as u8; // B
         }
     }
     argb
 }
 
-/// Convert an ARGB8888 buffer to NV12 using BT.601.
+/// Convert an ARGB8888 buffer to NV12 using BT.709.
 ///
-/// Single-pass direct conversion — no intermediate copies.
+/// BT.709 is correct for HD video (>= 720p). Single-pass, no intermediate copies.
+///
+/// Inverse of [`nv12_to_argb`].
 #[must_use]
 #[inline]
 pub fn argb_to_nv12(argb: &[u8], width: u32, height: u32) -> Vec<u8> {
@@ -403,18 +411,20 @@ pub fn argb_to_nv12(argb: &[u8], width: u32, height: u32) -> Vec<u8> {
     let ch = h.div_ceil(2);
     let mut nv12 = vec![0u8; w * h + cw * ch * 2];
 
-    // Y plane: BT.601 Y = (77*R + 150*G + 29*B) >> 8
+    // Y plane: BT.709 Y = (54*R + 183*G + 19*B) >> 8
     for y in 0..h {
         for x in 0..w {
             let i = (y * w + x) * 4;
             let r = argb[i + 1] as u16;
             let g = argb[i + 2] as u16;
             let b = argb[i + 3] as u16;
-            nv12[y * w + x] = ((77 * r + 150 * g + 29 * b) >> 8) as u8;
+            nv12[y * w + x] = ((54 * r + 183 * g + 19 * b) >> 8) as u8;
         }
     }
 
     // UV plane (interleaved, subsampled 2x2)
+    // BT.709 Cb = (-29*R - 99*G + 128*B) >> 8 + 128
+    // BT.709 Cr = (128*R - 116*G - 12*B) >> 8 + 128
     let uv_off = w * h;
     for y in (0..ch * 2).step_by(2) {
         for x in (0..cw * 2).step_by(2) {
@@ -423,9 +433,9 @@ pub fn argb_to_nv12(argb: &[u8], width: u32, height: u32) -> Vec<u8> {
             let g = argb[i + 2] as i32;
             let b = argb[i + 3] as i32;
             let ci = (y / 2) * cw * 2 + x;
-            nv12[uv_off + ci] = ((-43 * r - 85 * g + 128 * b + 128 * 256) >> 8).clamp(0, 255) as u8;
+            nv12[uv_off + ci] = ((-29 * r - 99 * g + 128 * b + 128 * 256) >> 8).clamp(0, 255) as u8;
             nv12[uv_off + ci + 1] =
-                ((128 * r - 107 * g - 21 * b + 128 * 256) >> 8).clamp(0, 255) as u8;
+                ((128 * r - 116 * g - 12 * b + 128 * 256) >> 8).clamp(0, 255) as u8;
         }
     }
     nv12

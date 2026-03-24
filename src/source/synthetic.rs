@@ -110,7 +110,7 @@ impl Source for SyntheticSource {
 
     fn capture_frame(&self) -> anyhow::Result<Option<RawFrame>> {
         let n = self.frame_count.fetch_add(1, Ordering::Relaxed);
-        let frame_duration_us = 1_000_000u64 / self.fps as u64;
+        let frame_duration_us = 1_000_000u64 / self.fps.max(1) as u64;
         let pts_us = n * frame_duration_us;
         Ok(Some(self.generate_frame(pts_us)))
     }
@@ -168,6 +168,18 @@ mod tests {
         let f1 = src.capture_frame().unwrap().unwrap();
         let f2 = src.capture_frame().unwrap().unwrap();
         assert!(f2.pts_us > f1.pts_us);
+    }
+
+    #[test]
+    fn zero_fps_no_panic() {
+        let src = SyntheticSource::new("zero", 2, 2, 0, Pattern::Solid([255, 0, 0, 0]));
+        let f = src.capture_frame().unwrap().unwrap();
+        assert!(f.is_valid());
+        assert_eq!(f.pts_us, 0);
+        // Second frame should also work (not div-by-zero)
+        let f2 = src.capture_frame().unwrap().unwrap();
+        // fps=0 treated as 1fps: second frame gets pts = 1_000_000
+        assert_eq!(f2.pts_us, 1_000_000);
     }
 
     #[test]

@@ -242,13 +242,16 @@ fn capture_source_frames(
 }
 
 fn parse_hex_color(hex: &str) -> anyhow::Result<[u8; 4]> {
-    if hex.len() != 8 {
+    let bytes: Vec<u8> = hex.bytes().filter(|b| b.is_ascii_hexdigit()).collect();
+    if bytes.len() != 8 {
         anyhow::bail!("color must be 8 hex chars (RRGGBBAA), got: {hex}");
     }
-    let r = u8::from_str_radix(&hex[0..2], 16)?;
-    let g = u8::from_str_radix(&hex[2..4], 16)?;
-    let b = u8::from_str_radix(&hex[4..6], 16)?;
-    let a = u8::from_str_radix(&hex[6..8], 16)?;
+    // Safe: all bytes are ASCII hex digits, so from_utf8 and from_str_radix won't fail
+    let s = std::str::from_utf8(&bytes).expect("ASCII hex");
+    let r = u8::from_str_radix(&s[0..2], 16)?;
+    let g = u8::from_str_radix(&s[2..4], 16)?;
+    let b = u8::from_str_radix(&s[4..6], 16)?;
+    let a = u8::from_str_radix(&s[6..8], 16)?;
     Ok([r, g, b, a])
 }
 
@@ -367,10 +370,11 @@ fn cmd_record(
     for frame_num in 0..total_frames {
         clock.tick();
 
-        // Video: capture → composite → encode → output
+        // Video: capture → composite → encode → reclaim → output
         let frames = capture_source_frames(&scene, &source);
         let composited = compositor.compose(&scene, &frames, clock.current_pts_us());
         let packet = encoder.encode_frame(&composited)?;
+        compositor.reclaim_buffer(composited.data);
         if let Some(ref mut mp4) = mp4_out {
             mp4.write_video(&packet)?;
         } else if let Some(ref mut raw) = file_out {
@@ -464,6 +468,8 @@ fn cmd_preview(source_str: &str, fps: u32, max_frames: u64) -> anyhow::Result<()
         let frames = capture_source_frames(&scene, &source);
 
         let composited = compositor.compose(&scene, &frames, clock.current_pts_us());
+        let composited_pts = composited.pts_us;
+        compositor.reclaim_buffer(composited.data);
 
         if (frame_num + 1) % (fps as u64) == 0 {
             let elapsed = start.elapsed().as_secs_f64();
@@ -471,19 +477,20 @@ fn cmd_preview(source_str: &str, fps: u32, max_frames: u64) -> anyhow::Result<()
             info!(
                 "frame {}: pts={}µs, {:.0} fps, behind={}",
                 frame_num + 1,
-                composited.pts_us,
+                composited_pts,
                 actual_fps,
                 clock.is_behind()
             );
         }
     }
 
+    let frames_run = if max_frames == 0 { total } else { max_frames };
     let elapsed = start.elapsed();
     info!(
         "preview done: {} frames in {:.2}s ({:.1} fps)",
-        total.min(max_frames),
+        frames_run,
         elapsed.as_secs_f64(),
-        total.min(max_frames) as f64 / elapsed.as_secs_f64()
+        frames_run as f64 / elapsed.as_secs_f64()
     );
 
     Ok(())

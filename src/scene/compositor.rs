@@ -87,7 +87,7 @@ impl Compositor {
             vec![0u8; buf_size]
         };
 
-        for layer in scene.visible_layers() {
+        for layer in scene.layers().iter().filter(|l| l.visible) {
             match &layer.content {
                 LayerContent::ColorFill { color } => {
                     self.blend_color_fill(&mut buffer, layer, *color);
