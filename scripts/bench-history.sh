@@ -39,9 +39,10 @@ for bench in "${BENCHES[@]}"; do
 
     # Parse criterion output lines like:
     #   bench_name          time:   [1.234 ms 1.256 ms 1.278 ms]
-    echo "$OUTPUT" | grep -E '^\S.*time:' | while IFS= read -r line; do
-        # Extract benchmark name (first word) and median time (middle value in brackets)
-        NAME=$(echo "$line" | awk '{print $1}')
+    #   group/param/value   time:   [1.234 ms 1.256 ms 1.278 ms]
+    echo "$OUTPUT" | grep -E 'time:\s+\[' | while IFS= read -r line; do
+        # Extract benchmark name: everything before "time:" trimmed
+        NAME=$(echo "$line" | sed 's/\s*time:.*//' | sed 's/^[[:space:]]*//' | sed 's/[[:space:]]*$//')
         # Extract the middle value and unit from [low median high]
         MEDIAN=$(echo "$line" | sed -n 's/.*\[\([0-9.]* [a-zµ]*\) \([0-9.]* [a-zµ]*\) .*/\2/p')
         VALUE=$(echo "$MEDIAN" | awk '{print $1}')

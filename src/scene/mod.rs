@@ -93,8 +93,15 @@ pub struct SceneGraph {
 
 impl SceneGraph {
     /// Create a new scene with the given output resolution and framerate.
+    ///
+    /// # Panics
+    ///
+    /// Debug-asserts that width, height, and fps are all non-zero.
     #[must_use]
     pub fn new(width: u32, height: u32, fps: u32) -> Self {
+        debug_assert!(width > 0, "scene width must be > 0");
+        debug_assert!(height > 0, "scene height must be > 0");
+        debug_assert!(fps > 0, "scene fps must be > 0");
         Self {
             width,
             height,

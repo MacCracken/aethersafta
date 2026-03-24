@@ -207,14 +207,23 @@ impl AudioMixer {
         mix: f32,
     ) -> bool {
         if let Some(dsp_state) = self.source_dsp.get_mut(&id) {
-            let delay_ms = delay_ms.clamp(0.1, 5000.0);
-            let feedback = feedback.clamp(0.0, 0.95);
-            let mix = mix.clamp(0.0, 1.0);
+            let delay_ms_c = delay_ms.clamp(0.1, 5000.0);
+            let feedback_c = feedback.clamp(0.0, 0.95);
+            let mix_c = mix.clamp(0.0, 1.0);
+            if (delay_ms_c - delay_ms).abs() > f32::EPSILON
+                || (feedback_c - feedback).abs() > f32::EPSILON
+                || (mix_c - mix).abs() > f32::EPSILON
+            {
+                tracing::debug!(
+                    source_id = %id,
+                    "delay params clamped: delay={delay_ms}->{delay_ms_c}, feedback={feedback}->{feedback_c}, mix={mix}->{mix_c}"
+                );
+            }
             dsp_state.delay = Some(dsp::DelayLine::new(
-                delay_ms,
-                delay_ms * 2.0,
-                feedback,
-                mix,
+                delay_ms_c,
+                delay_ms_c * 2.0,
+                feedback_c,
+                mix_c,
                 self.config.sample_rate,
                 self.config.channels,
             ));
