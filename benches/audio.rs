@@ -141,6 +141,7 @@ fn bench_mix_with_dsp(c: &mut Criterion) {
                 release_ms: 50.0,
                 makeup_gain_db: 0.0,
                 knee_db: 6.0,
+                mix: 1.0,
             },
         );
 
@@ -179,6 +180,7 @@ fn bench_mix_with_dsp(c: &mut Criterion) {
                 release_ms: 100.0,
                 makeup_gain_db: 3.0,
                 knee_db: 6.0,
+                mix: 1.0,
             },
         );
 

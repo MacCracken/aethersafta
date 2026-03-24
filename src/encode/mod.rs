@@ -83,7 +83,7 @@ enum EncoderInner {
     #[cfg(feature = "vaapi")]
     Vaapi(tarang::video::VaapiEncoder),
     #[cfg(feature = "openh264-enc")]
-    OpenH264(tarang::video::OpenH264Encoder),
+    OpenH264(Box<tarang::video::OpenH264Encoder>),
 }
 
 impl EncodePipeline {
@@ -194,7 +194,7 @@ impl EncodePipeline {
                 };
                 let enc = tarang::video::OpenH264Encoder::new(&enc_config)?;
                 tracing::info!("encoder: OpenH264 (software)");
-                return Ok(EncoderInner::OpenH264(enc));
+                return Ok(EncoderInner::OpenH264(Box::new(enc)));
             }
         }
 

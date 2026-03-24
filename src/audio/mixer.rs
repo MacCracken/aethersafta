@@ -433,6 +433,7 @@ mod tests {
                 release_ms: 50.0,
                 makeup_gain_db: 0.0,
                 knee_db: 0.0,
+                mix: 1.0,
             },
         );
 
@@ -608,6 +609,7 @@ mod tests {
             release_ms: 50.0,
             makeup_gain_db: 0.0,
             knee_db: 0.0,
+            mix: 1.0,
         };
         assert!(!mixer.set_source_compressor(Uuid::new_v4(), params));
     }
