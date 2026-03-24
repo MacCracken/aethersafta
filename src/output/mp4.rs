@@ -16,6 +16,7 @@ pub struct Mp4Output {
     muxer: Mp4Muxer<File>,
     packets_written: u64,
     bytes_written: u64,
+    finalized: bool,
 }
 
 impl Mp4Output {
@@ -48,6 +49,7 @@ impl Mp4Output {
             muxer,
             packets_written: 0,
             bytes_written: 0,
+            finalized: false,
         })
     }
 
@@ -74,6 +76,7 @@ impl Mp4Output {
             muxer,
             packets_written: 0,
             bytes_written: 0,
+            finalized: false,
         })
     }
 
@@ -94,23 +97,38 @@ impl Mp4Output {
 
     /// Finalize the MP4 container (write moov atom, fix headers).
     pub fn finalize(&mut self) -> anyhow::Result<()> {
-        self.muxer.finalize()?;
+        if !self.finalized {
+            self.muxer.finalize()?;
+            self.finalized = true;
+        }
         Ok(())
     }
 
     /// The output file path.
+    #[must_use]
     pub fn path(&self) -> &Path {
         &self.path
     }
 
     /// Total video packets written.
+    #[must_use]
     pub fn packets_written(&self) -> u64 {
         self.packets_written
     }
 
     /// Total bytes written to the container.
+    #[must_use]
     pub fn bytes_written(&self) -> u64 {
         self.bytes_written
+    }
+}
+
+impl Drop for Mp4Output {
+    fn drop(&mut self) {
+        if !self.finalized {
+            // Best-effort finalize to prevent corrupt MP4 files.
+            let _ = self.muxer.finalize();
+        }
     }
 }
 

@@ -29,11 +29,15 @@ struct ClipRect {
 }
 
 impl ClipRect {
+    #[inline]
     fn compute(lx: i32, ly: i32, lw: u32, lh: u32, out_w: u32, out_h: u32) -> Option<Self> {
         let x0 = lx.max(0) as u32;
         let y0 = ly.max(0) as u32;
-        let x1 = ((lx + lw as i32) as u32).min(out_w);
-        let y1 = ((ly + lh as i32) as u32).min(out_h);
+        // Use i64 to avoid overflow when position + size exceeds i32 range
+        let x1_i64 = (lx as i64 + lw as i64).clamp(0, out_w as i64);
+        let y1_i64 = (ly as i64 + lh as i64).clamp(0, out_h as i64);
+        let x1 = x1_i64 as u32;
+        let y1 = y1_i64 as u32;
         if x0 >= x1 || y0 >= y1 {
             return None;
         }
@@ -49,10 +53,12 @@ impl ClipRect {
 }
 
 impl Compositor {
+    #[must_use]
     pub fn new(width: u32, height: u32) -> Self {
         Self { width, height }
     }
 
+    #[must_use]
     pub fn compose(
         &self,
         scene: &SceneGraph,
@@ -86,6 +92,7 @@ impl Compositor {
         }
     }
 
+    #[inline]
     fn blend_color_fill(&self, buffer: &mut [u8], layer: &crate::scene::Layer, color: [u8; 4]) {
         let (lw, lh) = layer.size.unwrap_or((self.width, self.height));
         let clip = match ClipRect::compute(
@@ -100,7 +107,7 @@ impl Compositor {
             None => return,
         };
 
-        let opacity = (layer.opacity * 255.0).min(255.0) as u8;
+        let opacity = (layer.opacity.clamp(0.0, 1.0) * 255.0) as u8;
         // color is [R, G, B, A] from scene; convert to ARGB for blend
         let src_argb = [color[3], color[0], color[1], color[2]];
         let eff_a = ((src_argb[0] as u16 * opacity as u16) >> 8) as u8;
@@ -139,6 +146,7 @@ impl Compositor {
         }
     }
 
+    #[inline]
     fn blend_frame(&self, buffer: &mut [u8], layer: &crate::scene::Layer, frame: &RawFrame) {
         let (fw, fh) = (frame.width, frame.height);
         let (lw, lh) = layer.size.unwrap_or((fw, fh));
@@ -154,7 +162,7 @@ impl Compositor {
             None => return,
         };
 
-        let opacity_fp = (layer.opacity * 256.0) as u16;
+        let opacity_fp = (layer.opacity.clamp(0.0, 1.0) * 256.0) as u16;
         let stride = self.width as usize * 4;
         let needs_scale = lw != fw || lh != fh;
 
@@ -203,7 +211,7 @@ impl Compositor {
             let dst_row_end = dst_row_start + clip.w as usize * 4;
             let dst_row = &mut buffer[dst_row_start..dst_row_end];
 
-            if opacity_fp >= 255 {
+            if opacity_fp >= 256 {
                 let all_opaque = src_row.chunks_exact(4).all(|px| px[0] == 255);
                 if all_opaque {
                     dst_row.copy_from_slice(src_row);
@@ -225,7 +233,9 @@ impl Compositor {
 ///
 /// `opacity_fp` is fixed-point Q8 (256 = fully opaque layer).
 /// Delegates to ranga's ARGB blend which includes SIMD acceleration.
+#[inline]
 fn blend_row_alpha(dst: &mut [u8], src: &[u8], opacity_fp: u16) {
+    // ranga expects 0..=255; 256 means fully opaque so pass 255
     let opacity = opacity_fp.min(255) as u8;
     ranga::blend::blend_row_normal_argb(src, dst, opacity);
 }

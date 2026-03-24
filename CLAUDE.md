@@ -56,6 +56,7 @@ aethersafha (desktop compositor), streaming app, tazama, SY, selah
 - **tracing on all operations** — structured logging for audit trail.
 
 ## DO NOT
+- **Do not commit or push** — the user handles all git operations (commit, push, tag)
 
 - **NEVER use `gh` CLI** — use `curl` to GitHub API only
 - Do not add unnecessary dependencies — keep it lean

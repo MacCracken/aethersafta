@@ -10,6 +10,7 @@ use uuid::Uuid;
 pub type SourceId = Uuid;
 
 /// Pixel format of a raw frame.
+#[non_exhaustive]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum PixelFormat {
     /// 4 bytes per pixel: [A, R, G, B].
@@ -35,11 +36,13 @@ pub struct RawFrame {
 
 impl RawFrame {
     /// Expected byte length for ARGB8888 at the given dimensions.
+    #[must_use]
     pub fn expected_size(width: u32, height: u32) -> usize {
         Self::expected_size_for(PixelFormat::Argb8888, width, height)
     }
 
     /// Expected byte length for a given format and dimensions.
+    #[must_use]
     pub fn expected_size_for(format: PixelFormat, width: u32, height: u32) -> usize {
         match format {
             PixelFormat::Argb8888 => width as usize * height as usize * 4,
@@ -53,6 +56,7 @@ impl RawFrame {
     }
 
     /// Whether the data length matches the expected size for this frame's format.
+    #[must_use]
     pub fn is_valid(&self) -> bool {
         self.data.len() == Self::expected_size_for(self.format, self.width, self.height)
     }
@@ -77,6 +81,7 @@ pub trait Source: Send + Sync {
 }
 
 /// Source type descriptor (for serialisation / scene saving).
+#[non_exhaustive]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum SourceConfig {

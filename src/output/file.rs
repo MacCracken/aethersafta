@@ -4,15 +4,17 @@
 //! muxing will be added when tarang supports video muxing.
 
 use std::fs::File;
-use std::io::Write;
+use std::io::{BufWriter, Write};
 use std::path::{Path, PathBuf};
 
 use super::{EncodedPacket, OutputSink};
 
 /// Writes encoded video packets to a file.
+///
+/// Uses a 256 KB buffer to avoid per-packet syscalls.
 pub struct FileOutput {
     path: PathBuf,
-    file: File,
+    file: BufWriter<File>,
     bytes_written: u64,
     packets_written: u64,
 }
@@ -21,7 +23,7 @@ impl FileOutput {
     /// Create a new file output sink.
     pub fn create(path: impl AsRef<Path>) -> anyhow::Result<Self> {
         let path = path.as_ref();
-        let file = File::create(path)?;
+        let file = BufWriter::with_capacity(256 * 1024, File::create(path)?);
         Ok(Self {
             path: path.to_path_buf(),
             file,
@@ -31,16 +33,19 @@ impl FileOutput {
     }
 
     /// The output file path.
+    #[must_use]
     pub fn path(&self) -> &Path {
         &self.path
     }
 
     /// Total bytes written.
+    #[must_use]
     pub fn bytes_written(&self) -> u64 {
         self.bytes_written
     }
 
     /// Total packets written.
+    #[must_use]
     pub fn packets_written(&self) -> u64 {
         self.packets_written
     }

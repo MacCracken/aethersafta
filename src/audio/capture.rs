@@ -33,6 +33,7 @@ pub struct AudioCaptureManager {
 #[cfg(feature = "pipewire")]
 impl AudioCaptureManager {
     /// Create a new capture manager.
+    #[must_use]
     pub fn new() -> Self {
         Self {
             sources: HashMap::new(),
@@ -42,6 +43,7 @@ impl AudioCaptureManager {
     }
 
     /// Create with custom defaults.
+    #[must_use]
     pub fn with_defaults(sample_rate: u32, buffer_frames: u32) -> Self {
         Self {
             sources: HashMap::new(),
@@ -96,6 +98,7 @@ impl AudioCaptureManager {
     ///
     /// Returns a map of source ID → latest audio buffer, suitable for
     /// passing directly to [`AudioMixer::mix`](super::AudioMixer::mix).
+    #[must_use]
     pub fn drain_buffers(&self) -> HashMap<AudioSourceId, dhvani::buffer::AudioBuffer> {
         let mut buffers = HashMap::new();
 
@@ -117,6 +120,7 @@ impl AudioCaptureManager {
     }
 
     /// Collect hot-plug events from all sources.
+    #[must_use]
     pub fn drain_events(&self) -> Vec<(AudioSourceId, CaptureEvent)> {
         let mut events = Vec::new();
         for (&id, source) in &self.sources {
@@ -128,11 +132,13 @@ impl AudioCaptureManager {
     }
 
     /// Number of active capture sources.
+    #[must_use]
     pub fn source_count(&self) -> usize {
         self.sources.len()
     }
 
     /// Whether a specific source is currently capturing.
+    #[must_use]
     pub fn is_running(&self, id: AudioSourceId) -> bool {
         self.sources
             .get(&id)
@@ -150,6 +156,7 @@ impl AudioCaptureManager {
     }
 
     /// Get the config for a source.
+    #[must_use]
     pub fn get_config(&self, id: AudioSourceId) -> Option<&AudioSourceConfig> {
         self.sources.get(&id).map(|s| &s.config)
     }

@@ -10,6 +10,7 @@ use uuid::Uuid;
 use super::{PixelFormat, RawFrame, Source, SourceId};
 
 /// Pattern type for synthetic frame generation.
+#[non_exhaustive]
 #[derive(Debug, Clone, Copy)]
 pub enum Pattern {
     /// Solid color fill (ARGB).
@@ -33,6 +34,7 @@ pub struct SyntheticSource {
 
 impl SyntheticSource {
     /// Create a new synthetic source.
+    #[must_use]
     pub fn new(
         name: impl Into<String>,
         width: u32,

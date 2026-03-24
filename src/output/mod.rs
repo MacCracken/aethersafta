@@ -19,6 +19,7 @@ pub struct EncodedPacket {
 }
 
 /// Output configuration.
+#[non_exhaustive]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum OutputConfig {
@@ -35,11 +36,13 @@ pub enum OutputConfig {
 
 impl OutputConfig {
     /// Convenience: file output.
+    #[must_use]
     pub fn file(path: impl Into<String>) -> Self {
         Self::File { path: path.into() }
     }
 
     /// Convenience: RTMP output.
+    #[must_use]
     pub fn rtmp(url: impl Into<String>, key: impl Into<String>) -> Self {
         Self::Rtmp {
             url: url.into(),

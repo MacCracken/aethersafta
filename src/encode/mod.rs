@@ -39,6 +39,7 @@ impl Default for EncoderConfig {
 }
 
 /// Supported video codecs for output.
+#[non_exhaustive]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum VideoCodec {
     H264,
@@ -48,6 +49,7 @@ pub enum VideoCodec {
 }
 
 /// Which encoder backend is active.
+#[non_exhaustive]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EncoderBackend {
     /// VA-API hardware encoder (Intel/AMD GPU).
@@ -88,6 +90,7 @@ enum EncoderInner {
 
 impl EncodePipeline {
     /// Create a new encode pipeline. Call [`init`] before encoding.
+    #[must_use]
     pub fn new(config: EncoderConfig) -> Self {
         Self {
             config,
@@ -239,6 +242,7 @@ impl EncodePipeline {
     }
 
     /// Which encoder backend is active.
+    #[must_use]
     pub fn backend(&self) -> EncoderBackend {
         match &self.encoder {
             #[cfg(feature = "vaapi")]
@@ -250,6 +254,7 @@ impl EncodePipeline {
     }
 
     /// Number of frames encoded so far.
+    #[must_use]
     pub fn frames_encoded(&self) -> u64 {
         self.frames_encoded
     }
@@ -258,6 +263,7 @@ impl EncodePipeline {
 /// Detect and describe the best available encoder without initialising it.
 ///
 /// Useful for `aethersafta info` to show what encoding is available.
+#[must_use]
 pub fn detect_best_encoder(codec: VideoCodec) -> EncoderBackend {
     #[cfg(all(feature = "hwaccel", feature = "vaapi"))]
     {
@@ -284,6 +290,7 @@ pub fn detect_best_encoder(codec: VideoCodec) -> EncoderBackend {
 }
 
 #[cfg(any(feature = "vaapi", feature = "openh264-enc"))]
+#[inline]
 fn make_video_frame(frame: &RawFrame) -> tarang::core::VideoFrame {
     let yuv = argb_to_yuv420p(&frame.data, frame.width, frame.height);
     tarang::core::VideoFrame {
@@ -296,6 +303,7 @@ fn make_video_frame(frame: &RawFrame) -> tarang::core::VideoFrame {
 }
 
 #[cfg(any(feature = "vaapi", feature = "openh264-enc"))]
+#[inline]
 fn make_packet(
     data: Vec<u8>,
     pts_us: u64,
@@ -310,49 +318,117 @@ fn make_packet(
     }
 }
 
-/// Convert an ARGB8888 buffer to YUV420p (planar Y, U, V) via ranga.
+/// Convert an ARGB8888 buffer to YUV420p (planar Y, U, V) using BT.709.
 ///
-/// Converts ARGB→RGBA, then delegates to ranga's BT.709 fixed-point conversion
-/// (correct for HD video, H.264 assumes BT.709 for >= 720p).
+/// Single-pass direct conversion from ARGB layout — no intermediate copies.
+/// BT.709 is correct for HD video (H.264 assumes BT.709 for >= 720p).
+#[must_use]
+#[inline]
 pub fn argb_to_yuv420p(argb: &[u8], width: u32, height: u32) -> Vec<u8> {
-    let argb_buf = ranga::pixel::PixelBuffer::new(
-        argb.to_vec(),
-        width,
-        height,
-        ranga::pixel::PixelFormat::Argb8,
-    )
-    .expect("ARGB buffer size mismatch");
-    let rgba_buf = ranga::convert::argb8_to_rgba8(&argb_buf).expect("ARGB→RGBA conversion");
-    let yuv_buf =
-        ranga::convert::rgba_to_yuv420p_bt709(&rgba_buf).expect("RGBA→YUV420p BT.709 conversion");
-    yuv_buf.data
+    let w = width as usize;
+    let h = height as usize;
+    let cw = w.div_ceil(2);
+    let ch = h.div_ceil(2);
+    let mut yuv = vec![0u8; w * h + 2 * cw * ch];
+
+    // Y plane: BT.709 Y = (54*R + 183*G + 19*B) >> 8
+    for y in 0..h {
+        for x in 0..w {
+            let i = (y * w + x) * 4;
+            let r = argb[i + 1] as u16;
+            let g = argb[i + 2] as u16;
+            let b = argb[i + 3] as u16;
+            yuv[y * w + x] = ((54 * r + 183 * g + 19 * b) >> 8) as u8;
+        }
+    }
+
+    // U and V planes (subsampled 2x2)
+    let u_off = w * h;
+    let v_off = u_off + cw * ch;
+    for y in (0..ch * 2).step_by(2) {
+        for x in (0..cw * 2).step_by(2) {
+            let i = (y * w + x) * 4;
+            let r = argb[i + 1] as i32;
+            let g = argb[i + 2] as i32;
+            let b = argb[i + 3] as i32;
+            let ci = (y / 2) * cw + (x / 2);
+            yuv[u_off + ci] = ((-29 * r - 99 * g + 128 * b + 128 * 256) >> 8).clamp(0, 255) as u8;
+            yuv[v_off + ci] = ((128 * r - 116 * g - 12 * b + 128 * 256) >> 8).clamp(0, 255) as u8;
+        }
+    }
+    yuv
 }
 
-/// Convert an NV12 buffer to ARGB8888 via ranga.
+/// Convert an NV12 buffer to ARGB8888 using BT.601.
+///
+/// Single-pass direct conversion — no intermediate copies.
+#[must_use]
+#[inline]
 pub fn nv12_to_argb(nv12: &[u8], width: u32, height: u32) -> Vec<u8> {
-    let nv12_buf = ranga::pixel::PixelBuffer::new(
-        nv12.to_vec(),
-        width,
-        height,
-        ranga::pixel::PixelFormat::Nv12,
-    )
-    .expect("NV12 buffer size mismatch");
-    let rgba_buf = ranga::convert::nv12_to_rgba(&nv12_buf).expect("NV12→RGBA conversion");
-    let argb_buf = ranga::convert::rgba8_to_argb8(&rgba_buf).expect("RGBA→ARGB conversion");
-    argb_buf.data
+    let w = width as usize;
+    let h = height as usize;
+    let cw = w.div_ceil(2);
+    let ch = h.div_ceil(2);
+    let uv_off = w * h;
+    let uv_stride = cw * 2;
+    let mut argb = vec![0u8; w * h * 4];
+
+    for y in 0..h {
+        let cy = (y / 2).min(ch.saturating_sub(1));
+        for x in 0..w {
+            let cx = (x / 2).min(cw.saturating_sub(1));
+            let yi = nv12[y * w + x] as i16;
+            let uv_idx = uv_off + cy * uv_stride + cx * 2;
+            let u = nv12[uv_idx] as i16 - 128;
+            let v = nv12[uv_idx + 1] as i16 - 128;
+            let oi = (y * w + x) * 4;
+            argb[oi] = 255; // A
+            argb[oi + 1] = (yi + ((359 * v) >> 8)).clamp(0, 255) as u8; // R
+            argb[oi + 2] = (yi - ((88 * u + 183 * v) >> 8)).clamp(0, 255) as u8; // G
+            argb[oi + 3] = (yi + ((454 * u) >> 8)).clamp(0, 255) as u8; // B
+        }
+    }
+    argb
 }
 
-/// Convert an ARGB8888 buffer to NV12 via ranga.
+/// Convert an ARGB8888 buffer to NV12 using BT.601.
+///
+/// Single-pass direct conversion — no intermediate copies.
+#[must_use]
+#[inline]
 pub fn argb_to_nv12(argb: &[u8], width: u32, height: u32) -> Vec<u8> {
-    let argb_buf = ranga::pixel::PixelBuffer::new(
-        argb.to_vec(),
-        width,
-        height,
-        ranga::pixel::PixelFormat::Argb8,
-    )
-    .expect("ARGB buffer size mismatch");
-    let nv12_buf = ranga::convert::argb_to_nv12(&argb_buf).expect("ARGB→NV12 conversion");
-    nv12_buf.data
+    let w = width as usize;
+    let h = height as usize;
+    let cw = w.div_ceil(2);
+    let ch = h.div_ceil(2);
+    let mut nv12 = vec![0u8; w * h + cw * ch * 2];
+
+    // Y plane: BT.601 Y = (77*R + 150*G + 29*B) >> 8
+    for y in 0..h {
+        for x in 0..w {
+            let i = (y * w + x) * 4;
+            let r = argb[i + 1] as u16;
+            let g = argb[i + 2] as u16;
+            let b = argb[i + 3] as u16;
+            nv12[y * w + x] = ((77 * r + 150 * g + 29 * b) >> 8) as u8;
+        }
+    }
+
+    // UV plane (interleaved, subsampled 2x2)
+    let uv_off = w * h;
+    for y in (0..ch * 2).step_by(2) {
+        for x in (0..cw * 2).step_by(2) {
+            let i = (y * w + x) * 4;
+            let r = argb[i + 1] as i32;
+            let g = argb[i + 2] as i32;
+            let b = argb[i + 3] as i32;
+            let ci = (y / 2) * cw * 2 + x;
+            nv12[uv_off + ci] = ((-43 * r - 85 * g + 128 * b + 128 * 256) >> 8).clamp(0, 255) as u8;
+            nv12[uv_off + ci + 1] =
+                ((128 * r - 107 * g - 21 * b + 128 * 256) >> 8).clamp(0, 255) as u8;
+        }
+    }
+    nv12
 }
 
 #[cfg(test)]

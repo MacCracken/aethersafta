@@ -37,6 +37,7 @@ pub struct AudioMixer {
 
 impl AudioMixer {
     /// Create a new mixer with the given configuration.
+    #[must_use]
     pub fn new(config: AudioMixerConfig) -> Self {
         let master_limiter = if config.master_limiter {
             dsp::EnvelopeLimiter::new(dsp::LimiterParams::default(), config.sample_rate).ok()
@@ -92,6 +93,7 @@ impl AudioMixer {
     }
 
     /// Get source configuration by ID.
+    #[must_use]
     pub fn get_source(&self, id: AudioSourceId) -> Option<&AudioSourceEntry> {
         self.sources.iter().find(|s| s.id == id)
     }
@@ -138,21 +140,25 @@ impl AudioMixer {
     }
 
     /// All registered sources.
+    #[must_use]
     pub fn sources(&self) -> &[AudioSourceEntry] {
         &self.sources
     }
 
     /// Number of sources.
+    #[must_use]
     pub fn source_count(&self) -> usize {
         self.sources.len()
     }
 
     /// Current mixer configuration.
+    #[must_use]
     pub fn config(&self) -> &AudioMixerConfig {
         &self.config
     }
 
     /// Per-source peak level for a channel in dB (post-DSP, pre-mix).
+    #[must_use]
     pub fn source_peak_db(&self, id: AudioSourceId, channel: usize) -> Option<f32> {
         self.source_dsp
             .get(&id)
@@ -160,6 +166,7 @@ impl AudioMixer {
     }
 
     /// Per-source RMS level for a channel in dB (post-DSP, pre-mix).
+    #[must_use]
     pub fn source_rms_db(&self, id: AudioSourceId, channel: usize) -> Option<f32> {
         self.source_dsp
             .get(&id)
@@ -167,16 +174,19 @@ impl AudioMixer {
     }
 
     /// Master peak level for a channel in dB.
+    #[must_use]
     pub fn master_peak_db(&self, channel: usize) -> f32 {
         self.master_meter.peak_db(channel)
     }
 
     /// Master RMS level for a channel in dB.
+    #[must_use]
     pub fn master_rms_db(&self, channel: usize) -> f32 {
         self.master_meter.rms_db(channel)
     }
 
     /// Integrated LUFS of the master bus.
+    #[must_use]
     pub fn master_lufs(&self) -> f32 {
         self.master_meter.lufs
     }

@@ -57,6 +57,7 @@ impl ImageSource {
     }
 
     /// Create an ImageSource directly from ARGB8888 pixel data (for testing).
+    #[must_use]
     pub fn from_raw(name: impl Into<String>, width: u32, height: u32, data: Vec<u8>) -> Self {
         Self {
             id: Uuid::new_v4(),
@@ -73,6 +74,7 @@ impl ImageSource {
     }
 
     /// The file path this image was loaded from.
+    #[must_use]
     pub fn path(&self) -> &Path {
         &self.path
     }

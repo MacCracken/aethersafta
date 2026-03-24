@@ -15,6 +15,7 @@ pub struct FrameClock {
 
 impl FrameClock {
     /// Create a new frame clock for the given framerate.
+    #[must_use]
     pub fn new(fps: u32) -> Self {
         Self {
             fps,
@@ -25,21 +26,25 @@ impl FrameClock {
     }
 
     /// Target framerate.
+    #[must_use]
     pub fn fps(&self) -> u32 {
         self.fps
     }
 
     /// Duration of a single frame.
+    #[must_use]
     pub fn frame_duration(&self) -> Duration {
         self.frame_duration
     }
 
     /// Total frames produced.
+    #[must_use]
     pub fn frame_count(&self) -> u64 {
         self.frame_count
     }
 
     /// PTS in microseconds for the current frame.
+    #[must_use]
     pub fn current_pts_us(&self) -> u64 {
         self.frame_count * self.frame_duration.as_micros() as u64
     }
@@ -53,6 +58,7 @@ impl FrameClock {
     }
 
     /// Elapsed wall time since start.
+    #[must_use]
     pub fn elapsed(&self) -> Duration {
         self.start_time
             .map(|s| s.elapsed())
@@ -60,9 +66,11 @@ impl FrameClock {
     }
 
     /// Whether we're behind schedule (need to drop frames).
+    #[must_use]
     pub fn is_behind(&self) -> bool {
         if let Some(start) = self.start_time {
-            let expected = self.frame_duration * self.frame_count as u32;
+            let expected_us = self.frame_duration.as_micros() as u64 * self.frame_count;
+            let expected = Duration::from_micros(expected_us);
             start.elapsed() > expected + self.frame_duration
         } else {
             false
@@ -87,6 +95,7 @@ pub struct LatencyBudget {
 
 impl LatencyBudget {
     /// Create a budget with the given target latency.
+    #[must_use]
     pub fn new(target: Duration) -> Self {
         Self {
             target,
@@ -98,16 +107,19 @@ impl LatencyBudget {
     }
 
     /// Total measured latency in microseconds.
+    #[must_use]
     pub fn total_us(&self) -> u64 {
         self.capture_us + self.composite_us + self.encode_us + self.output_us
     }
 
     /// Whether the pipeline is within budget.
+    #[must_use]
     pub fn within_budget(&self) -> bool {
         self.total_us() <= self.target.as_micros() as u64
     }
 
     /// How much headroom remains (negative = over budget).
+    #[must_use]
     pub fn headroom_us(&self) -> i64 {
         self.target.as_micros() as i64 - self.total_us() as i64
     }

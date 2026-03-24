@@ -15,6 +15,7 @@ use uuid::Uuid;
 pub type LayerId = Uuid;
 
 /// What kind of content a layer displays.
+#[non_exhaustive]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum LayerContent {
     /// Live source (screen, camera, media file).
@@ -51,6 +52,7 @@ pub struct Layer {
 
 impl Layer {
     /// Create a new layer with default settings.
+    #[must_use]
     pub fn new(name: impl Into<String>, content: LayerContent) -> Self {
         Self {
             id: Uuid::new_v4(),
@@ -65,6 +67,7 @@ impl Layer {
     }
 
     /// Convenience: create a screen capture layer.
+    #[must_use]
     pub fn screen_capture() -> Self {
         Self::new(
             "Screen",
@@ -90,6 +93,7 @@ pub struct SceneGraph {
 
 impl SceneGraph {
     /// Create a new scene with the given output resolution and framerate.
+    #[must_use]
     pub fn new(width: u32, height: u32, fps: u32) -> Self {
         Self {
             width,
@@ -115,26 +119,31 @@ impl SceneGraph {
     }
 
     /// Get a layer by ID.
+    #[must_use]
     pub fn get_layer(&self, id: LayerId) -> Option<&Layer> {
         self.layers.iter().find(|l| l.id == id)
     }
 
     /// Get a mutable layer by ID.
+    #[must_use]
     pub fn get_layer_mut(&mut self, id: LayerId) -> Option<&mut Layer> {
         self.layers.iter_mut().find(|l| l.id == id)
     }
 
     /// All layers in compositing order (bottom to top).
+    #[must_use]
     pub fn layers(&self) -> &[Layer] {
         &self.layers
     }
 
     /// Visible layers only, in compositing order.
+    #[must_use]
     pub fn visible_layers(&self) -> Vec<&Layer> {
         self.layers.iter().filter(|l| l.visible).collect()
     }
 
     /// Number of layers.
+    #[must_use]
     pub fn layer_count(&self) -> usize {
         self.layers.len()
     }

@@ -269,6 +269,8 @@ struct SourceNodes {
     input: NodeId,
     gain: NodeId,
     dsp: NodeId,
+    gain_value: f32,
+    pan_value: f32,
 }
 
 /// A graph-based audio pipeline that routes multiple sources through
@@ -290,6 +292,7 @@ pub struct AudioPipeline {
 
 impl AudioPipeline {
     /// Create a new graph-based audio pipeline.
+    #[must_use]
     pub fn new(config: AudioMixerConfig) -> Self {
         let mixer_node_id = NodeId::next();
         let master_node_id = NodeId::next();
@@ -321,12 +324,13 @@ impl AudioPipeline {
                 input: input_id,
                 gain: gain_id,
                 dsp: dsp_id,
+                gain_value: gain,
+                pan_value: pan,
             },
         );
         self.source_meters
             .insert(id, dhvani::meter::PeakMeter::new());
 
-        let _ = (gain, pan); // Used when building the graph below.
         self.dirty = true;
         self.compile_and_swap();
     }
@@ -359,8 +363,8 @@ impl AudioPipeline {
                     self.config.sample_rate,
                 )),
             );
-            graph.add_node(nodes.gain, Box::new(GainNode::new(1.0)));
-            graph.add_node(nodes.dsp, Box::new(DspChainNode::new(0.0)));
+            graph.add_node(nodes.gain, Box::new(GainNode::new(nodes.gain_value)));
+            graph.add_node(nodes.dsp, Box::new(DspChainNode::new(nodes.pan_value)));
 
             graph.connect(nodes.input, nodes.gain);
             graph.connect(nodes.gain, nodes.dsp);
@@ -384,16 +388,19 @@ impl AudioPipeline {
     }
 
     /// Get per-source peak levels (L, R) in linear amplitude.
+    #[must_use]
     pub fn source_peak(&self, id: AudioSourceId) -> Option<[f32; 2]> {
         self.source_meters.get(&id).map(|m| m.load())
     }
 
     /// Number of sources in the pipeline.
+    #[must_use]
     pub fn source_count(&self) -> usize {
         self.source_nodes.len()
     }
 
     /// Current configuration.
+    #[must_use]
     pub fn config(&self) -> &AudioMixerConfig {
         &self.config
     }
