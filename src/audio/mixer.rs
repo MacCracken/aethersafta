@@ -18,6 +18,11 @@ struct SourceDsp {
     gain_smoother: dsp::GainSmoother,
     compressor: Option<dsp::Compressor>,
     eq: Option<dsp::ParametricEq>,
+    graphic_eq: Option<dsp::GraphicEq>,
+    deesser: Option<dsp::DeEsser>,
+    reverb: Option<dsp::Reverb>,
+    delay: Option<dsp::DelayLine>,
+    noise_gate_threshold: Option<f32>,
     meter: LevelMeter,
 }
 
@@ -74,6 +79,11 @@ impl AudioMixer {
             gain_smoother,
             compressor: None,
             eq: None,
+            graphic_eq: None,
+            deesser: None,
+            reverb: None,
+            delay: None,
+            noise_gate_threshold: None,
             meter: LevelMeter::new(
                 self.config.channels as usize,
                 self.config.sample_rate as f32,
@@ -133,6 +143,101 @@ impl AudioMixer {
                 self.config.sample_rate,
                 self.config.channels,
             ));
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Enable per-source graphic EQ with the given settings.
+    pub fn set_source_graphic_eq(
+        &mut self,
+        id: AudioSourceId,
+        settings: dsp::GraphicEqSettings,
+    ) -> bool {
+        if let Some(dsp_state) = self.source_dsp.get_mut(&id) {
+            let mut geq = dsp::GraphicEq::new(self.config.sample_rate, self.config.channels);
+            geq.set_settings(settings);
+            dsp_state.graphic_eq = Some(geq);
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Enable per-source de-esser with the given parameters.
+    pub fn set_source_deesser(&mut self, id: AudioSourceId, params: dsp::DeEsserParams) -> bool {
+        if let Some(dsp_state) = self.source_dsp.get_mut(&id) {
+            dsp_state.deesser =
+                dsp::DeEsser::new(params, self.config.sample_rate, self.config.channels).ok();
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Enable per-source reverb with the given parameters.
+    pub fn set_source_reverb(&mut self, id: AudioSourceId, params: dsp::ReverbParams) -> bool {
+        if let Some(dsp_state) = self.source_dsp.get_mut(&id) {
+            dsp_state.reverb = dsp::Reverb::new(params, self.config.sample_rate).ok();
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Enable per-source delay with the given parameters.
+    ///
+    /// `delay_ms` is the delay time, `feedback` controls echo repetition
+    /// (0.0–1.0), `mix` controls dry/wet balance (0.0 = dry, 1.0 = wet).
+    pub fn set_source_delay(
+        &mut self,
+        id: AudioSourceId,
+        delay_ms: f32,
+        feedback: f32,
+        mix: f32,
+    ) -> bool {
+        if let Some(dsp_state) = self.source_dsp.get_mut(&id) {
+            dsp_state.delay = Some(dsp::DelayLine::new(
+                delay_ms,
+                delay_ms * 2.0, // max delay headroom
+                feedback,
+                mix,
+                self.config.sample_rate,
+                self.config.channels,
+            ));
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Enable per-source noise gate. Samples below the threshold (in linear
+    /// amplitude, e.g. 0.01) are silenced.
+    pub fn set_source_noise_gate(&mut self, id: AudioSourceId, threshold: f32) -> bool {
+        if let Some(dsp_state) = self.source_dsp.get_mut(&id) {
+            dsp_state.noise_gate_threshold = Some(threshold);
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Disable a specific per-source effect. Pass the effect name:
+    /// `"compressor"`, `"eq"`, `"graphic_eq"`, `"deesser"`, `"reverb"`,
+    /// `"delay"`, `"noise_gate"`.
+    pub fn clear_source_effect(&mut self, id: AudioSourceId, effect: &str) -> bool {
+        if let Some(dsp_state) = self.source_dsp.get_mut(&id) {
+            match effect {
+                "compressor" => dsp_state.compressor = None,
+                "eq" => dsp_state.eq = None,
+                "graphic_eq" => dsp_state.graphic_eq = None,
+                "deesser" => dsp_state.deesser = None,
+                "reverb" => dsp_state.reverb = None,
+                "delay" => dsp_state.delay = None,
+                "noise_gate" => dsp_state.noise_gate_threshold = None,
+                _ => return false,
+            }
             true
         } else {
             false
@@ -213,7 +318,9 @@ impl AudioMixer {
 
             let mut buf = buf;
 
-            // Apply per-source DSP chain
+            // Apply per-source DSP chain:
+            //   gain → noise gate → EQ → graphic EQ → compressor → de-esser
+            //   → delay → reverb → pan → sanitize → meter
             if let Some(dsp_state) = self.source_dsp.get_mut(&entry.id) {
                 // Smoothed gain (click-free volume transitions)
                 let target_gain = dsp::db_to_amplitude(entry.config.gain_db);
@@ -222,12 +329,35 @@ impl AudioMixer {
                     buf.apply_gain(smoothed_gain);
                 }
 
+                // Noise gate (silence below threshold)
+                if let Some(threshold) = dsp_state.noise_gate_threshold {
+                    dsp::noise_gate(&mut buf, threshold);
+                }
+
+                // EQ (parametric or graphic — parametric takes priority)
                 if let Some(eq) = &mut dsp_state.eq {
                     eq.process(&mut buf);
+                } else if let Some(geq) = &mut dsp_state.graphic_eq {
+                    geq.process(&mut buf);
                 }
+
+                // Dynamics
                 if let Some(comp) = &mut dsp_state.compressor {
                     comp.process(&mut buf);
                 }
+                if let Some(deesser) = &mut dsp_state.deesser {
+                    deesser.process(&mut buf);
+                }
+
+                // Time-based effects
+                if let Some(delay) = &mut dsp_state.delay {
+                    delay.process(&mut buf);
+                }
+                if let Some(reverb) = &mut dsp_state.reverb {
+                    reverb.process(&mut buf);
+                }
+
+                // Spatial
                 dsp_state.pan.process(&mut buf);
 
                 // Sanitize after DSP chain to catch NaN/Inf from filter instability
@@ -673,5 +803,183 @@ mod tests {
             2,
             "multi source should preserve 2 channels"
         );
+    }
+
+    #[test]
+    fn noise_gate_silences_below_threshold() {
+        let mut mixer = AudioMixer::new(AudioMixerConfig {
+            master_limiter: false,
+            ..Default::default()
+        });
+        let id = mixer.add_source(AudioSourceConfig::new("Gated"));
+        mixer.set_source_noise_gate(id, 0.3);
+
+        let mut buffers = HashMap::new();
+        buffers.insert(id, test_buffer(0.1, 1024)); // below threshold
+        let result = mixer.mix(&mut buffers).unwrap();
+        // All samples should be silenced
+        assert!(
+            result.peak() < 0.01,
+            "noise gate should silence signal below threshold, peak={}",
+            result.peak()
+        );
+    }
+
+    #[test]
+    fn deesser_processes_without_error() {
+        let mut mixer = AudioMixer::new(AudioMixerConfig {
+            master_limiter: false,
+            ..Default::default()
+        });
+        let id = mixer.add_source(AudioSourceConfig::new("DeEssed"));
+        assert!(mixer.set_source_deesser(
+            id,
+            dsp::DeEsserParams {
+                freq_hz: 6000.0,
+                threshold_db: -20.0,
+                reduction_db: 6.0,
+                q: 1.0,
+            },
+        ));
+
+        let mut buffers = HashMap::new();
+        buffers.insert(id, test_buffer(0.5, 1024));
+        let result = mixer.mix(&mut buffers);
+        assert!(result.is_some());
+    }
+
+    #[test]
+    fn graphic_eq_processes_without_error() {
+        let mut mixer = AudioMixer::new(AudioMixerConfig {
+            master_limiter: false,
+            ..Default::default()
+        });
+        let id = mixer.add_source(AudioSourceConfig::new("GEQ"));
+        let settings = dsp::GraphicEqSettings {
+            enabled: true,
+            bands: [3.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, -3.0],
+        };
+        assert!(mixer.set_source_graphic_eq(id, settings));
+
+        let mut buffers = HashMap::new();
+        buffers.insert(id, test_buffer(0.5, 1024));
+        let result = mixer.mix(&mut buffers);
+        assert!(result.is_some());
+    }
+
+    #[test]
+    fn reverb_processes_without_error() {
+        let mut mixer = AudioMixer::new(AudioMixerConfig {
+            master_limiter: false,
+            ..Default::default()
+        });
+        let id = mixer.add_source(AudioSourceConfig::new("Reverbed"));
+        assert!(mixer.set_source_reverb(
+            id,
+            dsp::ReverbParams {
+                room_size: 0.8,
+                damping: 0.5,
+                mix: 0.3,
+            },
+        ));
+
+        let mut buffers = HashMap::new();
+        buffers.insert(id, test_buffer(0.5, 1024));
+        let result = mixer.mix(&mut buffers);
+        assert!(result.is_some());
+    }
+
+    #[test]
+    fn delay_processes_without_error() {
+        let mut mixer = AudioMixer::new(AudioMixerConfig {
+            master_limiter: false,
+            ..Default::default()
+        });
+        let id = mixer.add_source(AudioSourceConfig::new("Delayed"));
+        assert!(mixer.set_source_delay(id, 50.0, 0.3, 0.5));
+
+        let mut buffers = HashMap::new();
+        buffers.insert(id, test_buffer(0.5, 1024));
+        let result = mixer.mix(&mut buffers);
+        assert!(result.is_some());
+    }
+
+    #[test]
+    fn clear_source_effect_works() {
+        let mut mixer = AudioMixer::new(AudioMixerConfig {
+            master_limiter: false,
+            ..Default::default()
+        });
+        let id = mixer.add_source(AudioSourceConfig::new("Fx"));
+        mixer.set_source_noise_gate(id, 0.1);
+        assert!(mixer.clear_source_effect(id, "noise_gate"));
+        assert!(!mixer.clear_source_effect(id, "nonexistent"));
+        assert!(!mixer.clear_source_effect(Uuid::new_v4(), "noise_gate"));
+    }
+
+    #[test]
+    fn full_dsp_chain() {
+        let mut mixer = AudioMixer::new(AudioMixerConfig {
+            master_limiter: true,
+            ..Default::default()
+        });
+        let id = mixer.add_source(AudioSourceConfig::new("Full Chain"));
+
+        // Enable everything
+        mixer.set_source_noise_gate(id, 0.01);
+        mixer.set_source_eq(
+            id,
+            vec![dsp::EqBandConfig {
+                band_type: dsp::BandType::HighPass,
+                freq_hz: 80.0,
+                gain_db: 0.0,
+                q: 0.707,
+                enabled: true,
+            }],
+        );
+        mixer.set_source_compressor(
+            id,
+            dsp::CompressorParams {
+                threshold_db: -20.0,
+                ratio: 4.0,
+                attack_ms: 5.0,
+                release_ms: 50.0,
+                makeup_gain_db: 0.0,
+                knee_db: 6.0,
+                mix: 1.0,
+            },
+        );
+        mixer.set_source_deesser(
+            id,
+            dsp::DeEsserParams {
+                freq_hz: 6000.0,
+                threshold_db: -20.0,
+                reduction_db: 6.0,
+                q: 1.0,
+            },
+        );
+        mixer.set_source_delay(id, 10.0, 0.2, 0.3);
+        mixer.set_source_reverb(
+            id,
+            dsp::ReverbParams {
+                room_size: 0.5,
+                damping: 0.5,
+                mix: 0.2,
+            },
+        );
+
+        // Run multiple mix cycles to exercise stateful effects
+        for _ in 0..5 {
+            let mut buffers = HashMap::new();
+            buffers.insert(id, test_buffer(0.5, 1024));
+            let result = mixer.mix(&mut buffers);
+            assert!(result.is_some());
+            let mixed = result.unwrap();
+            // No NaN/Inf from the full chain
+            for &s in mixed.samples() {
+                assert!(!s.is_nan(), "full chain produced NaN");
+                assert!(!s.is_infinite(), "full chain produced Inf");
+            }
+        }
     }
 }
