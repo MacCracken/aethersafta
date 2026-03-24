@@ -119,7 +119,7 @@ fn synthetic_source_single_layer_pipeline() {
     let layer_id = layer.id;
     scene.add_layer(layer);
 
-    let compositor = Compositor::new(64, 64);
+    let mut compositor = Compositor::new(64, 64);
 
     // Composite 3 frames
     for i in 0..3 {
@@ -161,7 +161,7 @@ fn multi_source_compositing() {
     let fg_id = fg_layer.id;
     scene.add_layer(fg_layer);
 
-    let compositor = Compositor::new(128, 128);
+    let mut compositor = Compositor::new(128, 128);
     let mut frames = HashMap::new();
     frames.insert(bg_id, bg.capture_frame().unwrap().unwrap());
     frames.insert(fg_id, fg.capture_frame().unwrap().unwrap());
@@ -216,7 +216,7 @@ fn opacity_blending_pipeline() {
     let layer_id = layer.id;
     scene.add_layer(layer);
 
-    let compositor = Compositor::new(4, 4);
+    let mut compositor = Compositor::new(4, 4);
     let mut frames = HashMap::new();
     frames.insert(layer_id, src.capture_frame().unwrap().unwrap());
 
@@ -281,7 +281,7 @@ fn file_output_pipeline() {
     let layer_id = layer.id;
     scene.add_layer(layer);
 
-    let compositor = Compositor::new(16, 16);
+    let mut compositor = Compositor::new(16, 16);
     let mut clock = FrameClock::new(10);
     let mut output = FileOutput::create(&path).unwrap();
 
@@ -338,7 +338,7 @@ fn full_encode_pipeline() {
     let layer_id = layer.id;
     scene.add_layer(layer);
 
-    let compositor = Compositor::new(320, 240);
+    let mut compositor = Compositor::new(320, 240);
     let mut encoder = EncodePipeline::new(EncoderConfig {
         codec: VideoCodec::H264,
         bitrate_kbps: 1000,
@@ -491,7 +491,7 @@ fn scene_graph_empty_compose() {
 
     let scene = SceneGraph::new(16, 16, 30);
     let frames = HashMap::new();
-    let compositor = Compositor::new(16, 16);
+    let mut compositor = Compositor::new(16, 16);
     let result = compositor.compose(&scene, &frames, 0);
 
     // All pixels should be zero (no layers = blank output)
@@ -584,7 +584,7 @@ fn color_fill_gradient_layers() {
     fg.opacity = 0.5;
     scene.add_layer(fg);
 
-    let compositor = Compositor::new(4, 4);
+    let mut compositor = Compositor::new(4, 4);
     let frames = HashMap::new();
     let result = compositor.compose(&scene, &frames, 0);
 

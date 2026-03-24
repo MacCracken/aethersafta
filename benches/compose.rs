@@ -63,7 +63,7 @@ fn make_argb_frame(width: u32, height: u32, val: u8) -> RawFrame {
 fn bench_composite_color_fill(c: &mut Criterion) {
     let mut group = c.benchmark_group("composite_color_fill");
     for &(w, h, label) in &[(1920, 1080, "1080p"), (3840, 2160, "4K")] {
-        let comp = Compositor::new(w, h);
+        let mut comp = Compositor::new(w, h);
         let mut scene = SceneGraph::new(w, h, 30);
         scene.add_layer(Layer::new(
             "bg",
@@ -86,7 +86,7 @@ fn bench_composite_source_layers(c: &mut Criterion) {
     for &n_layers in &[1, 3, 5] {
         let w = 1920;
         let h = 1080;
-        let comp = Compositor::new(w, h);
+        let mut comp = Compositor::new(w, h);
         let mut scene = SceneGraph::new(w, h, 30);
         let mut frames = HashMap::new();
 
@@ -122,7 +122,7 @@ fn bench_composite_source_layers(c: &mut Criterion) {
 fn bench_composite_scaled(c: &mut Criterion) {
     let w = 1920;
     let h = 1080;
-    let comp = Compositor::new(w, h);
+    let mut comp = Compositor::new(w, h);
     let mut scene = SceneGraph::new(w, h, 30);
 
     // 640x480 source scaled up to fill 1920x1080
@@ -154,7 +154,7 @@ fn bench_composite_multi_scaled(c: &mut Criterion) {
     for &n_layers in &[2, 4] {
         let w = 1920;
         let h = 1080;
-        let comp = Compositor::new(w, h);
+        let mut comp = Compositor::new(w, h);
         let mut scene = SceneGraph::new(w, h, 30);
         let mut frames = HashMap::new();
 
@@ -187,7 +187,7 @@ fn bench_composite_multi_scaled(c: &mut Criterion) {
 fn bench_composite_4k(c: &mut Criterion) {
     let w = 3840;
     let h = 2160;
-    let comp = Compositor::new(w, h);
+    let mut comp = Compositor::new(w, h);
     let mut scene = SceneGraph::new(w, h, 30);
 
     // Background fill

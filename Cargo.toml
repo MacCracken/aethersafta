@@ -1,6 +1,6 @@
 [package]
 name = "aethersafta"
-version = "0.23.3"
+version = "0.24.3"
 edition = "2024"
 rust-version = "1.89"
 license = "AGPL-3.0-only"
@@ -33,15 +33,9 @@ path = "src/main.rs"
 [dependencies]
 # Core
 serde = { version = "1", features = ["derive"] }
-serde_json = "1"
-chrono = { version = "0.4", features = ["serde"] }
 uuid = { version = "1", features = ["v4", "serde"] }
-thiserror = "2"
 anyhow = "1"
 bytes = "1"
-
-# Async
-tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "time", "signal", "sync", "io-util"] }
 
 # Logging
 tracing = "0.1"
@@ -54,7 +48,7 @@ clap = { version = "4", features = ["derive"] }
 image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
 
 # Image processing (color conversion, pixel format interchange)
-ranga = { version = "0.21.4", default-features = false }
+ranga = { version = "0.24.3", default-features = false }
 
 # Media encoding/muxing
 tarang = { version = "0.21.3", default-features = false }
@@ -67,8 +61,8 @@ dhvani = { version = "0.22.4", default-features = false, features = ["dsp", "gra
 
 [dev-dependencies]
 tempfile = "3"
+serde_json = "1"
 criterion = { version = "0.8", features = ["html_reports"] }
-tokio-test = "0.4"
 
 [[bench]]
 name = "compose"

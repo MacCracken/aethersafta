@@ -91,7 +91,7 @@ fn bench_full_pipeline(c: &mut Criterion) {
 
     let w = 640;
     let h = 480;
-    let comp = Compositor::new(w, h);
+    let mut comp = Compositor::new(w, h);
     let mut scene = SceneGraph::new(w, h, 30);
     scene.add_layer(Layer::new(
         "bg",

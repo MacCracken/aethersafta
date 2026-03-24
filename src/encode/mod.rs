@@ -73,7 +73,7 @@ impl std::fmt::Display for EncoderBackend {
 /// The encode pipeline consumes composited frames and produces encoded packets.
 ///
 /// Selects the best available encoder backend based on hardware detection
-/// and enabled features. Use [`backend`] to check which encoder is active.
+/// and enabled features. Use [`EncodePipeline::backend`] to check which encoder is active.
 pub struct EncodePipeline {
     pub config: EncoderConfig,
     encoder: EncoderInner,
@@ -89,7 +89,7 @@ enum EncoderInner {
 }
 
 impl EncodePipeline {
-    /// Create a new encode pipeline. Call [`init`] before encoding.
+    /// Create a new encode pipeline. Call [`EncodePipeline::init`] before encoding.
     #[must_use]
     pub fn new(config: EncoderConfig) -> Self {
         Self {

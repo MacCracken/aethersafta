@@ -24,12 +24,11 @@ checksum = "320119579fcad9c21884f5c4861d16174d0e06250625266f50fe6898340abefa"
 
 [[package]]
 name = "aethersafta"
-version = "0.23.3"
+version = "0.24.3"
 dependencies = [
  "ai-hwaccel",
  "anyhow",
  "bytes",
- "chrono",
  "clap",
  "criterion",
  "dhvani",
@@ -39,9 +38,6 @@ dependencies = [
  "serde_json",
  "tarang",
  "tempfile",
- "thiserror 2.0.18",
- "tokio",
- "tokio-test",
  "tracing",
  "tracing-subscriber",
  "uuid",
@@ -1689,9 +1685,9 @@ dependencies = [
 
 [[package]]
 name = "ranga"
-version = "0.21.4"
+version = "0.24.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "795e7e4dc0e7d12b923cc2bc8b0043e5b9c2c15daf62aa8cd5639f9d515e3301"
+checksum = "4334ceaab2846ba8e10920fa971efea61b13329dc45e89bfb643edd0c377e884"
 dependencies = [
  "serde",
  "serde_json",
@@ -2508,28 +2504,6 @@ checksum = "1729aa945f29d91ba541258c8df89027d5792d85a8841fb65e8bf0f4ede4ef61"
 dependencies = [
  "rustls",
  "tokio",
-]
-
-[[package]]
-name = "tokio-stream"
-version = "0.1.18"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "32da49809aab5c3bc678af03902d4ccddea2a87d028d86392a4b1560c6906c70"
-dependencies = [
- "futures-core",
- "pin-project-lite",
- "tokio",
-]
-
-[[package]]
-name = "tokio-test"
-version = "0.4.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3f6d24790a10a7af737693a3e8f1d03faef7e6ca0cc99aae5066f533766de545"
-dependencies = [
- "futures-core",
- "tokio",
- "tokio-stream",
 ]
 
 [[package]]

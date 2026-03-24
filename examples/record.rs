@@ -62,7 +62,7 @@ fn main() -> anyhow::Result<()> {
     let content_id = scene.add_layer(content);
 
     // -- pipeline ------------------------------------------------------------
-    let compositor = Compositor::new(width, height);
+    let mut compositor = Compositor::new(width, height);
     let mut encoder = EncodePipeline::new(EncoderConfig {
         bitrate_kbps: 4000,
         keyframe_interval: 30,

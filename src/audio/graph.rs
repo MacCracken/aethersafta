@@ -2,27 +2,29 @@
 //!
 //! Builds an audio processing graph where each source flows through
 //! per-source DSP nodes, into a mixer node, then through master DSP
-//! to the output. The graph is compiled into an [`ExecutionPlan`] and
+//! to the output. The graph is compiled into an execution plan and
 //! processed by a [`GraphProcessor`] for real-time safe execution.
 //!
 //! ```text
-//! Source 1 → [Gain] → [EQ] → [Compressor] → [Pan] ──┐
-//! Source 2 → [Gain] → [EQ] → [Compressor] → [Pan] ──┤
-//!                                                     ├→ [Mixer] → [Limiter] → [Meter] → Output
-//! Source N → [Gain] → [EQ] → [Compressor] → [Pan] ──┘
+//! Source 1 → [Gain] → [EQ → Gate → Comp → DeEss → Delay → Reverb → Pan → Meter] ──┐
+//! Source 2 → [Gain] → [EQ → Gate → Comp → DeEss → Delay → Reverb → Pan → Meter] ──┤
+//!                                                                                    ├→ [Mixer] → [Limiter] → [Meter] → Output
+//! Source N → [Gain] → [EQ → Gate → Comp → DeEss → Delay → Reverb → Pan → Meter] ──┘
 //! ```
 
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use dhvani::buffer::AudioBuffer;
+use dhvani::dsp;
 use dhvani::graph::{AudioNode, Graph, GraphProcessor, NodeId};
+use dhvani::meter::PeakMeter;
 
 use super::{AudioMixerConfig, AudioSourceId};
 
 // --- Audio graph nodes ---
 
 /// Input node: injects a captured audio buffer into the graph.
-#[allow(dead_code)]
 pub(crate) struct InputNode {
     buffer: Option<AudioBuffer>,
     channels: u32,
@@ -69,7 +71,6 @@ impl AudioNode for InputNode {
 }
 
 /// Gain node: applies a linear gain multiplier.
-#[allow(dead_code)]
 pub(crate) struct GainNode {
     gain: f32,
 }
@@ -141,30 +142,64 @@ impl AudioNode for MixerNode {
     }
 }
 
-/// DSP chain node: applies EQ, compressor, and panner in sequence.
-#[allow(dead_code)]
+/// DSP chain node: applies the full per-source effect chain in sequence.
+///
+/// Processing order matches [`AudioMixer::mix`]:
+///   EQ → noise gate → compressor → de-esser → delay → reverb → pan → sanitize → meter
 pub(crate) struct DspChainNode {
-    eq: Option<dhvani::dsp::ParametricEq>,
-    compressor: Option<dhvani::dsp::Compressor>,
-    panner: dhvani::dsp::StereoPanner,
+    eq: Option<dsp::ParametricEq>,
+    graphic_eq: Option<dsp::GraphicEq>,
+    noise_gate_threshold: Option<f32>,
+    compressor: Option<dsp::Compressor>,
+    deesser: Option<dsp::DeEsser>,
+    delay: Option<dsp::DelayLine>,
+    reverb: Option<dsp::Reverb>,
+    panner: dsp::StereoPanner,
+    meter: Arc<PeakMeter>,
 }
 
 #[allow(dead_code)]
 impl DspChainNode {
-    pub fn new(pan: f32) -> Self {
+    pub fn new(pan: f32, meter: Arc<PeakMeter>) -> Self {
         Self {
             eq: None,
+            graphic_eq: None,
+            noise_gate_threshold: None,
             compressor: None,
-            panner: dhvani::dsp::StereoPanner::new(pan),
+            deesser: None,
+            delay: None,
+            reverb: None,
+            panner: dsp::StereoPanner::new(pan),
+            meter,
         }
     }
 
-    pub fn set_eq(&mut self, eq: dhvani::dsp::ParametricEq) {
+    pub fn set_eq(&mut self, eq: dsp::ParametricEq) {
         self.eq = Some(eq);
     }
 
-    pub fn set_compressor(&mut self, comp: dhvani::dsp::Compressor) {
+    pub fn set_graphic_eq(&mut self, geq: dsp::GraphicEq) {
+        self.graphic_eq = Some(geq);
+    }
+
+    pub fn set_noise_gate(&mut self, threshold: f32) {
+        self.noise_gate_threshold = Some(threshold.clamp(0.0, 1.0));
+    }
+
+    pub fn set_compressor(&mut self, comp: dsp::Compressor) {
         self.compressor = Some(comp);
+    }
+
+    pub fn set_deesser(&mut self, deesser: dsp::DeEsser) {
+        self.deesser = Some(deesser);
+    }
+
+    pub fn set_delay(&mut self, delay: dsp::DelayLine) {
+        self.delay = Some(delay);
+    }
+
+    pub fn set_reverb(&mut self, reverb: dsp::Reverb) {
+        self.reverb = Some(reverb);
     }
 
     pub fn set_pan(&mut self, pan: f32) {
@@ -189,22 +224,70 @@ impl AudioNode for DspChainNode {
     fn process(&mut self, inputs: &[&AudioBuffer], output: &mut AudioBuffer) {
         if let Some(input) = inputs.first() {
             *output = (*input).clone();
+
+            // EQ (parametric takes priority over graphic)
             if let Some(eq) = &mut self.eq {
                 eq.process(output);
+            } else if let Some(geq) = &mut self.graphic_eq {
+                geq.process(output);
             }
+
+            // Noise gate (after EQ so HP filter removes rumble first)
+            if let Some(threshold) = self.noise_gate_threshold {
+                dsp::noise_gate(output, threshold);
+            }
+
+            // Dynamics
             if let Some(comp) = &mut self.compressor {
                 comp.process(output);
             }
+            if let Some(deesser) = &mut self.deesser {
+                deesser.process(output);
+            }
+
+            // Time-based effects
+            if let Some(delay) = &mut self.delay {
+                delay.process(output);
+            }
+            if let Some(reverb) = &mut self.reverb {
+                reverb.process(output);
+            }
+
+            // Spatial
             self.panner.process(output);
+
+            // Sanitize after DSP chain to catch NaN/Inf from filter instability
             for sample in output.samples_mut() {
-                *sample = dhvani::dsp::sanitize_sample(*sample);
+                *sample = dsp::sanitize_sample(*sample);
+            }
+
+            // Per-source metering (shared with AudioPipeline via Arc)
+            let channels = output.channels();
+            let samples = output.samples();
+            let frames = output.frames();
+            if channels >= 2 && frames > 0 {
+                let mut peak_l: f32 = 0.0;
+                let mut peak_r: f32 = 0.0;
+                for frame in 0..frames {
+                    let l = samples[frame * channels as usize].abs();
+                    let r = samples[frame * channels as usize + 1].abs();
+                    if l > peak_l {
+                        peak_l = l;
+                    }
+                    if r > peak_r {
+                        peak_r = r;
+                    }
+                }
+                self.meter.store(peak_l, peak_r);
+            } else if channels == 1 && frames > 0 {
+                let peak = samples.iter().fold(0.0f32, |m, s| m.max(s.abs()));
+                self.meter.store(peak, peak);
             }
         }
     }
 }
 
 /// Master bus node: limiter + metering.
-#[allow(dead_code)]
 pub(crate) struct MasterNode {
     limiter: Option<dhvani::dsp::EnvelopeLimiter>,
     meter: dhvani::meter::LevelMeter,
@@ -282,6 +365,7 @@ struct SourceNodes {
     dsp: NodeId,
     gain_value: f32,
     pan_value: f32,
+    meter: Arc<PeakMeter>,
 }
 
 /// A graph-based audio pipeline that routes multiple sources through
@@ -289,7 +373,7 @@ struct SourceNodes {
 ///
 /// Uses [`dhvani::graph`] for topologically-sorted, real-time safe execution.
 /// The graph is rebuilt and compiled whenever sources are added or removed,
-/// with the new [`ExecutionPlan`] swapped into the processor lock-free.
+/// with the new execution plan swapped into the processor lock-free.
 pub struct AudioPipeline {
     config: AudioMixerConfig,
     source_nodes: HashMap<AudioSourceId, SourceNodes>,
@@ -297,8 +381,8 @@ pub struct AudioPipeline {
     master_node_id: NodeId,
     processor: GraphProcessor,
     dirty: bool,
-    /// Per-source metering (peak L/R).
-    source_meters: HashMap<AudioSourceId, dhvani::meter::PeakMeter>,
+    /// Per-source metering (peak L/R), shared with DspChainNode via Arc.
+    source_meters: HashMap<AudioSourceId, Arc<PeakMeter>>,
 }
 
 impl AudioPipeline {
@@ -329,6 +413,7 @@ impl AudioPipeline {
         let gain_id = NodeId::next();
         let dsp_id = NodeId::next();
 
+        let meter = Arc::new(PeakMeter::new());
         self.source_nodes.insert(
             id,
             SourceNodes {
@@ -337,10 +422,10 @@ impl AudioPipeline {
                 dsp: dsp_id,
                 gain_value: gain,
                 pan_value: pan,
+                meter: Arc::clone(&meter),
             },
         );
-        self.source_meters
-            .insert(id, dhvani::meter::PeakMeter::new());
+        self.source_meters.insert(id, meter);
 
         self.dirty = true;
         self.compile_and_swap();
@@ -390,7 +475,10 @@ impl AudioPipeline {
                 )),
             );
             graph.add_node(nodes.gain, Box::new(GainNode::new(nodes.gain_value)));
-            graph.add_node(nodes.dsp, Box::new(DspChainNode::new(nodes.pan_value)));
+            graph.add_node(
+                nodes.dsp,
+                Box::new(DspChainNode::new(nodes.pan_value, Arc::clone(&nodes.meter))),
+            );
 
             graph.connect(nodes.input, nodes.gain);
             graph.connect(nodes.gain, nodes.dsp);
@@ -420,6 +508,9 @@ impl AudioPipeline {
     }
 
     /// Get per-source peak levels (L, R) in linear amplitude.
+    ///
+    /// Values are updated during [`process()`](Self::process) by the
+    /// per-source `DspChainNode` via a shared [`Arc<PeakMeter>`].
     #[must_use]
     pub fn source_peak(&self, id: AudioSourceId) -> Option<[f32; 2]> {
         self.source_meters.get(&id).map(|m| m.load())
@@ -719,7 +810,7 @@ mod tests {
 
     #[test]
     fn dsp_chain_node_passthrough() {
-        let mut node = DspChainNode::new(0.0);
+        let mut node = DspChainNode::new(0.0, Arc::new(PeakMeter::new()));
         let input = AudioBuffer::from_interleaved(vec![0.5; 256 * 2], 2, 48000).unwrap();
         let mut output = silence_buf();
         node.process(&[&input], &mut output);
@@ -729,7 +820,7 @@ mod tests {
 
     #[test]
     fn dsp_chain_node_set_pan() {
-        let mut node = DspChainNode::new(0.0);
+        let mut node = DspChainNode::new(0.0, Arc::new(PeakMeter::new()));
         node.set_pan(-1.0); // hard left
         let input = AudioBuffer::from_interleaved(vec![0.5; 256 * 2], 2, 48000).unwrap();
         let mut output = silence_buf();
@@ -739,7 +830,7 @@ mod tests {
 
     #[test]
     fn dsp_chain_node_with_eq() {
-        let mut node = DspChainNode::new(0.0);
+        let mut node = DspChainNode::new(0.0, Arc::new(PeakMeter::new()));
         node.set_eq(dhvani::dsp::ParametricEq::new(
             vec![dhvani::dsp::EqBandConfig {
                 band_type: dhvani::dsp::BandType::HighPass,
@@ -759,7 +850,7 @@ mod tests {
 
     #[test]
     fn dsp_chain_node_with_compressor() {
-        let mut node = DspChainNode::new(0.0);
+        let mut node = DspChainNode::new(0.0, Arc::new(PeakMeter::new()));
         node.set_compressor(
             dhvani::dsp::Compressor::new(
                 dhvani::dsp::CompressorParams {
@@ -860,7 +951,10 @@ mod tests {
         assert_eq!(InputNode::new(2, 48000).name(), "input");
         assert_eq!(GainNode::new(1.0).name(), "gain");
         assert_eq!(MixerNode.name(), "mixer");
-        assert_eq!(DspChainNode::new(0.0).name(), "dsp_chain");
+        assert_eq!(
+            DspChainNode::new(0.0, Arc::new(PeakMeter::new())).name(),
+            "dsp_chain"
+        );
         assert_eq!(
             MasterNode::new(&AudioMixerConfig::default()).name(),
             "master"
@@ -881,7 +975,7 @@ mod tests {
         assert_eq!(mixer.num_inputs(), usize::MAX);
         assert_eq!(mixer.num_outputs(), 1);
 
-        let dsp = DspChainNode::new(0.0);
+        let dsp = DspChainNode::new(0.0, Arc::new(PeakMeter::new()));
         assert_eq!(dsp.num_inputs(), 1);
         assert_eq!(dsp.num_outputs(), 1);
 

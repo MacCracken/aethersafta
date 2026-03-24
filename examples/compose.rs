@@ -40,7 +40,7 @@ fn main() -> anyhow::Result<()> {
     println!("{scene}");
 
     // -- compose loop --------------------------------------------------------
-    let compositor = Compositor::new(width, height);
+    let mut compositor = Compositor::new(width, height);
     let mut clock = FrameClock::new(fps);
     let mut budget = LatencyBudget::new(Duration::from_secs_f64(1.0 / fps as f64));
 

@@ -1,7 +1,7 @@
 //! Static image source (PNG/JPEG).
 //!
 //! Loads an image file and converts it to an ARGB8888 [`RawFrame`].
-//! Returns the same frame on every [`capture_frame`] call.
+//! Returns the same frame on every [`Source::capture_frame`] call.
 
 use std::path::{Path, PathBuf};
 

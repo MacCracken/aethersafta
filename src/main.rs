@@ -310,7 +310,7 @@ fn cmd_record(
     audio_gain: f32,
 ) -> anyhow::Result<()> {
     let (scene, source) = build_scene(source_str, width, height, fps)?;
-    let compositor = Compositor::new(width, height);
+    let mut compositor = Compositor::new(width, height);
     let mut clock = FrameClock::new(fps);
 
     let total_frames = if duration_secs == 0 {
@@ -446,7 +446,7 @@ fn cmd_preview(source_str: &str, fps: u32, max_frames: u64) -> anyhow::Result<()
     let width = 1920;
     let height = 1080;
     let (scene, source) = build_scene(source_str, width, height, fps)?;
-    let compositor = Compositor::new(width, height);
+    let mut compositor = Compositor::new(width, height);
     let mut clock = FrameClock::new(fps);
 
     let total = if max_frames == 0 {

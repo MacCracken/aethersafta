@@ -13,9 +13,15 @@ use crate::source::{PixelFormat, RawFrame};
 use super::LayerId;
 
 /// Composites a scene graph into a single frame.
+///
+/// Stores a reusable buffer to eliminate per-frame heap allocation.
+/// Call [`reclaim_buffer()`](Self::reclaim_buffer) to return a frame's buffer
+/// after use, enabling zero-allocation steady-state compositing.
 pub struct Compositor {
     width: u32,
     height: u32,
+    /// Reusable compositing buffer (ARGB8888, width × height × 4 bytes).
+    scratch: Vec<u8>,
 }
 
 /// Pre-computed clipped rectangle in output coordinates.
@@ -55,18 +61,31 @@ impl ClipRect {
 impl Compositor {
     #[must_use]
     pub fn new(width: u32, height: u32) -> Self {
-        Self { width, height }
+        let buf_size = RawFrame::expected_size(width, height);
+        Self {
+            width,
+            height,
+            scratch: vec![0u8; buf_size],
+        }
     }
 
     #[must_use]
     pub fn compose(
-        &self,
+        &mut self,
         scene: &SceneGraph,
         frames: &HashMap<LayerId, RawFrame>,
         pts_us: u64,
     ) -> RawFrame {
         let buf_size = RawFrame::expected_size(self.width, self.height);
-        let mut buffer = vec![0u8; buf_size];
+
+        // Reuse scratch if available, otherwise allocate
+        let mut buffer = if self.scratch.len() == buf_size {
+            let mut buf = std::mem::take(&mut self.scratch);
+            buf.fill(0);
+            buf
+        } else {
+            vec![0u8; buf_size]
+        };
 
         for layer in scene.visible_layers() {
             match &layer.content {
@@ -90,6 +109,23 @@ impl Compositor {
             height: self.height,
             pts_us,
         }
+    }
+
+    /// Return a previously composed frame's data buffer for reuse.
+    ///
+    /// Call this after you're done with a [`RawFrame`] (e.g. after encoding)
+    /// to avoid heap allocation on the next [`compose()`](Self::compose) call.
+    ///
+    /// ```rust,no_run
+    /// # use aethersafta::Compositor;
+    /// # let mut comp = Compositor::new(1920, 1080);
+    /// # let scene = aethersafta::SceneGraph::new(1920, 1080, 30);
+    /// let frame = comp.compose(&scene, &Default::default(), 0);
+    /// // ... encode frame ...
+    /// comp.reclaim_buffer(frame.data);
+    /// ```
+    pub fn reclaim_buffer(&mut self, buf: Vec<u8>) {
+        self.scratch = buf;
     }
 
     #[inline]
@@ -251,7 +287,7 @@ mod tests {
 
     #[test]
     fn empty_scene_produces_transparent() {
-        let comp = Compositor::new(4, 4);
+        let mut comp = Compositor::new(4, 4);
         let scene = SceneGraph::new(4, 4, 30);
         let frame = comp.compose(&scene, &HashMap::new(), 0);
         assert!(frame.is_valid());
@@ -260,7 +296,7 @@ mod tests {
 
     #[test]
     fn color_fill_opaque() {
-        let comp = Compositor::new(2, 2);
+        let mut comp = Compositor::new(2, 2);
         let mut scene = SceneGraph::new(2, 2, 30);
         scene.add_layer(Layer::new(
             "red",
@@ -277,7 +313,7 @@ mod tests {
 
     #[test]
     fn color_fill_with_opacity() {
-        let comp = Compositor::new(1, 1);
+        let mut comp = Compositor::new(1, 1);
         let mut scene = SceneGraph::new(1, 1, 30);
         let mut layer = Layer::new(
             "half",
@@ -293,7 +329,7 @@ mod tests {
 
     #[test]
     fn source_layer_blended() {
-        let comp = Compositor::new(2, 2);
+        let mut comp = Compositor::new(2, 2);
         let mut scene = SceneGraph::new(2, 2, 30);
         let layer = Layer::new(
             "src",
@@ -320,7 +356,7 @@ mod tests {
 
     #[test]
     fn layer_position_offset() {
-        let comp = Compositor::new(4, 4);
+        let mut comp = Compositor::new(4, 4);
         let mut scene = SceneGraph::new(4, 4, 30);
         let mut layer = Layer::new(
             "offset",
@@ -340,7 +376,7 @@ mod tests {
 
     #[test]
     fn hidden_layer_skipped() {
-        let comp = Compositor::new(2, 2);
+        let mut comp = Compositor::new(2, 2);
         let mut scene = SceneGraph::new(2, 2, 30);
         let mut layer = Layer::new(
             "hidden",
@@ -356,7 +392,7 @@ mod tests {
 
     #[test]
     fn z_order_respected() {
-        let comp = Compositor::new(1, 1);
+        let mut comp = Compositor::new(1, 1);
         let mut scene = SceneGraph::new(1, 1, 30);
 
         let mut blue = Layer::new(
@@ -383,7 +419,7 @@ mod tests {
 
     #[test]
     fn negative_position_clipped() {
-        let comp = Compositor::new(4, 4);
+        let mut comp = Compositor::new(4, 4);
         let mut scene = SceneGraph::new(4, 4, 30);
         let mut layer = Layer::new(
             "partial",
@@ -417,7 +453,7 @@ mod tests {
     #[test]
     fn source_layer_with_partial_opacity() {
         // This exercises the SIMD blend_row_alpha path
-        let comp = Compositor::new(8, 8);
+        let mut comp = Compositor::new(8, 8);
         let mut scene = SceneGraph::new(8, 8, 30);
         let mut layer = Layer::new(
             "src",
@@ -451,7 +487,7 @@ mod tests {
 
     #[test]
     fn scaled_layer_composited() {
-        let comp = Compositor::new(8, 8);
+        let mut comp = Compositor::new(8, 8);
         let mut scene = SceneGraph::new(8, 8, 30);
         let mut layer = Layer::new(
             "scaled",
@@ -494,7 +530,7 @@ mod tests {
 
     #[test]
     fn multiple_layers_stacked() {
-        let comp = Compositor::new(8, 8);
+        let mut comp = Compositor::new(8, 8);
         let mut scene = SceneGraph::new(8, 8, 30);
 
         // Bottom: full-canvas blue (z=0)
@@ -546,7 +582,7 @@ mod tests {
 
     #[test]
     fn fully_transparent_layer_noop() {
-        let comp = Compositor::new(4, 4);
+        let mut comp = Compositor::new(4, 4);
         let mut scene = SceneGraph::new(4, 4, 30);
         let mut layer = Layer::new(
             "ghost",
@@ -566,7 +602,7 @@ mod tests {
 
     #[test]
     fn layer_outside_bounds() {
-        let comp = Compositor::new(4, 4);
+        let mut comp = Compositor::new(4, 4);
         let mut scene = SceneGraph::new(4, 4, 30);
         let mut layer = Layer::new(
             "offscreen",
@@ -587,7 +623,7 @@ mod tests {
 
     #[test]
     fn single_pixel_frame() {
-        let comp = Compositor::new(1, 1);
+        let mut comp = Compositor::new(1, 1);
         let mut scene = SceneGraph::new(1, 1, 30);
         let layer = Layer::new(
             "px",
@@ -618,7 +654,7 @@ mod tests {
 
     #[test]
     fn large_canvas_color_fill() {
-        let comp = Compositor::new(1920, 1080);
+        let mut comp = Compositor::new(1920, 1080);
         let mut scene = SceneGraph::new(1920, 1080, 30);
         scene.add_layer(Layer::new(
             "fill",
@@ -697,7 +733,7 @@ mod tests {
     #[test]
     fn color_fill_opacity_near_one() {
         // Opacity very close to 1.0 — tests the eff_a >= 254 fast path boundary
-        let comp = Compositor::new(2, 2);
+        let mut comp = Compositor::new(2, 2);
         let mut scene = SceneGraph::new(2, 2, 30);
         let mut layer = Layer::new(
             "almost_opaque",
@@ -722,7 +758,7 @@ mod tests {
     #[test]
     fn color_fill_very_low_opacity() {
         // Opacity just above 0 — should produce faint blend (slow path)
-        let comp = Compositor::new(2, 2);
+        let mut comp = Compositor::new(2, 2);
         let mut scene = SceneGraph::new(2, 2, 30);
         let mut layer = Layer::new(
             "faint",
@@ -743,7 +779,7 @@ mod tests {
     #[test]
     fn color_fill_zero_alpha_in_color() {
         // Color itself has alpha=0 — effective alpha should be 0, early return
-        let comp = Compositor::new(2, 2);
+        let mut comp = Compositor::new(2, 2);
         let mut scene = SceneGraph::new(2, 2, 30);
         scene.add_layer(Layer::new(
             "noalpha",
@@ -762,7 +798,7 @@ mod tests {
     #[test]
     fn color_fill_with_explicit_size() {
         // Explicitly sized color fill smaller than canvas
-        let comp = Compositor::new(4, 4);
+        let mut comp = Compositor::new(4, 4);
         let mut scene = SceneGraph::new(4, 4, 30);
         let mut layer = Layer::new(
             "sized",
@@ -785,7 +821,7 @@ mod tests {
     #[test]
     fn frame_with_partial_alpha_pixels() {
         // Source frame with mixed alpha — exercises the non-all-opaque path at full opacity
-        let comp = Compositor::new(2, 1);
+        let mut comp = Compositor::new(2, 1);
         let mut scene = SceneGraph::new(2, 1, 30);
         let layer = Layer::new(
             "mixed",
@@ -820,7 +856,7 @@ mod tests {
     #[test]
     fn frame_layer_no_matching_frame_is_noop() {
         // Source layer with no frame in the map — should not crash, buffer stays zero
-        let comp = Compositor::new(4, 4);
+        let mut comp = Compositor::new(4, 4);
         let mut scene = SceneGraph::new(4, 4, 30);
         scene.add_layer(Layer::new(
             "missing",
@@ -836,7 +872,7 @@ mod tests {
     #[test]
     fn scaled_upscale_layer() {
         // Source is 2x2, layer size is 8x8 — upscale path
-        let comp = Compositor::new(8, 8);
+        let mut comp = Compositor::new(8, 8);
         let mut scene = SceneGraph::new(8, 8, 30);
         let mut layer = Layer::new(
             "upscaled",
@@ -874,7 +910,7 @@ mod tests {
     #[test]
     fn frame_layer_partial_opacity_with_blend() {
         // Frame layer at 50% opacity — exercises the opacity_fp < 256 branch
-        let comp = Compositor::new(2, 2);
+        let mut comp = Compositor::new(2, 2);
         let mut scene = SceneGraph::new(2, 2, 30);
         let mut layer = Layer::new(
             "half_src",
@@ -913,7 +949,7 @@ mod tests {
     #[test]
     fn frame_layer_negative_position_clips_source() {
         // Frame placed at negative coords — tests src_x0/src_y0 offset calculations
-        let comp = Compositor::new(4, 4);
+        let mut comp = Compositor::new(4, 4);
         let mut scene = SceneGraph::new(4, 4, 30);
         let mut layer = Layer::new(
             "neg_frame",
@@ -953,7 +989,7 @@ mod tests {
     #[test]
     fn image_and_text_layers_need_frames() {
         // Image and Text content types also go through blend_frame
-        let comp = Compositor::new(2, 2);
+        let mut comp = Compositor::new(2, 2);
         let mut scene = SceneGraph::new(2, 2, 30);
 
         let img_layer = Layer::new(
@@ -1006,7 +1042,7 @@ mod tests {
 
     #[test]
     fn overlapping_semi_transparent() {
-        let comp = Compositor::new(1, 1);
+        let mut comp = Compositor::new(1, 1);
         let mut scene = SceneGraph::new(1, 1, 30);
 
         // Bottom: 50% red

@@ -37,7 +37,6 @@ pub struct AudioMixer {
     source_dsp: HashMap<AudioSourceId, SourceDsp>,
     master_limiter: Option<dsp::EnvelopeLimiter>,
     master_meter: LevelMeter,
-    #[allow(dead_code)] // Used for RT allocation pooling in future mix() optimization
     buffer_pool: BufferPool,
     /// Reusable scratch vec for collecting buffers to mix (avoids per-cycle alloc).
     mix_scratch: Vec<AudioBuffer>,
@@ -306,6 +305,27 @@ impl AudioMixer {
         self.master_meter.lufs
     }
 
+    /// Acquire a pre-allocated audio buffer from the pool.
+    ///
+    /// Use this to fill with captured audio data before passing to [`mix()`](Self::mix).
+    /// Avoids heap allocation on the real-time path. Call [`release_buffer()`](Self::release_buffer)
+    /// when done (or let the buffer drop — it just won't be reused).
+    #[must_use]
+    pub fn acquire_buffer(&mut self) -> AudioBuffer {
+        self.buffer_pool.acquire()
+    }
+
+    /// Return a buffer to the pool for reuse.
+    pub fn release_buffer(&mut self, buf: AudioBuffer) {
+        self.buffer_pool.release(buf);
+    }
+
+    /// Number of buffers currently available in the pool.
+    #[must_use]
+    pub fn pool_available(&self) -> usize {
+        self.buffer_pool.available()
+    }
+
     /// Mix the given per-source audio buffers into a single master buffer.
     ///
     /// `source_buffers` maps source IDs to their captured audio buffers.
@@ -391,6 +411,11 @@ impl AudioMixer {
         // Mix all sources
         let refs: Vec<&AudioBuffer> = self.mix_scratch.iter().collect();
         let mut mixed = dhvani::buffer::mix(&refs).ok()?;
+
+        // Return processed buffers to pool for reuse
+        for buf in self.mix_scratch.drain(..) {
+            self.buffer_pool.release(buf);
+        }
 
         // Master gain
         let master_gain = dsp::db_to_amplitude(self.config.master_gain_db);

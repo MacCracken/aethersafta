@@ -10,7 +10,7 @@ Aethersafta delegates low-level media work to sibling crates:
 
 | Crate | Version | Role | Key modules used |
 |-------|---------|------|-----------------|
-| [ranga](https://crates.io/crates/ranga) | 0.21.4 | Image processing, color conversion, blending, filters | `blend`, `convert`, `filter`, `transform`, `composite`, `histogram` |
+| [ranga](https://crates.io/crates/ranga) | 0.24.3 | Image processing, color conversion, blending, filters, GPU compute | `blend`, `convert`, `filter`, `transform`, `composite`, `histogram`, `icc`, `gpu` |
 | [tarang](https://crates.io/crates/tarang) | 0.21.3 | Media encoding/decoding, container muxing/demuxing | `audio`, `video`, `demux`, `core` |
 | [dhvani](https://crates.io/crates/dhvani) | 0.22.4 | Audio DSP, capture, mixing, metering, MIDI | `dsp`, `capture`, `buffer`, `clock`, `meter`, `graph` |
 | [ai-hwaccel](https://crates.io/crates/ai-hwaccel) | 0.23.3 | Hardware accelerator detection, disk-cached registry | encoder selection, fallback logic |
@@ -19,29 +19,29 @@ Items handled by these crates are noted inline. Aethersafta's scope is **orchest
 
 ---
 
-## v0.23.3 — Hardening (current)
+## v0.23.3 — Hardening
 
 ### Code audit
 
-- [ ] Round 1: `unsafe` review — verify all SIMD/FFI blocks, add `// SAFETY:` comments, fuzz edge cases (zero-size frames, odd dimensions, empty scenes)
-- [ ] Round 2: Error handling — replace remaining `expect()` in non-test code with proper `Result` propagation, add error context with `anyhow::Context`
-- [ ] Round 5: Dependency hygiene — remove unused deps, minimize feature flags, audit transitive `unsafe` with `cargo-geiger`, finalize `cargo-vet` supply chain
-- [ ] Architecture Decision Records (`docs/decisions/`) for key choices (ARGB vs NV12 internal format, SSE2 vs portable SIMD, tarang vs direct FFI)
+- [x] Round 1: `unsafe` review — zero `unsafe` blocks in src/, no SIMD/FFI (delegated to ranga/tarang)
+- [x] Round 2: Error handling — zero `expect()`/`unwrap()` in non-test code, all use `anyhow::Result`
+- [x] Round 5: Dependency hygiene — removed tokio, chrono, thiserror, tokio-test; moved serde_json to dev-deps; cargo-audit/deny clean
+- [x] Architecture Decision Records (`docs/decisions/`) — ADR-001 (ARGB format), ADR-002 (SIMD delegation), ADR-003 (tarang vs FFI)
 
 ### Audit fixes
 
-- [ ] `clear_source_effect` string API → `SourceEffect` enum with `#[non_exhaustive]`
-- [ ] Port 5 DSP effects (noise gate, de-esser, graphic EQ, reverb, delay) to graph pipeline `DspChainNode`
-- [ ] Activate `BufferPool` in mixer `mix()` — promote `to_mix`/`refs` to struct fields, eliminate per-cycle Vec allocations
-- [ ] Fix graph `source_meters` — call `.process()` on `PeakMeter` during graph execution, or remove dead metering
-- [ ] Compositor per-frame buffer reuse — accept `&mut Vec<u8>` scratch or store reusable buffer on `Compositor`
+- [x] `clear_source_effect` string API → `SourceEffect` enum with `#[non_exhaustive]` (done in v0.23.3)
+- [x] Port 5 DSP effects (noise gate, de-esser, graphic EQ, reverb, delay) to graph pipeline `DspChainNode`
+- [x] Activate `BufferPool` in mixer `mix()` — pool release after mixing, public acquire/release API
+- [x] Fix graph `source_meters` — `PeakMeter` wired via Arc sharing between `DspChainNode` and `AudioPipeline`
+- [x] Compositor per-frame buffer reuse — `Compositor` stores scratch buffer, `reclaim_buffer()` for zero-alloc steady state
 
 ### Performance & memory optimization
 
 - [ ] Round 1: Allocations — profile with DHAT, pool `RawFrame` buffers, eliminate per-frame allocations
 - [ ] Round 3: Cache & prefetch — optimize memory access patterns for L2 cache locality, benchmark with `perf stat` for cache miss rates
 
-> **Delegated to ranga**: SIMD color conversion (`ranga::convert`), SIMD scaled blending (`ranga::blend` + `ranga::transform`), pixel format interchange.
+> **Delegated to ranga 0.24.3**: SIMD color conversion (`ranga::convert`), SIMD scaled blending (`ranga::blend` + `ranga::transform`), SIMD brightness/grayscale filters, cache-aware blur tiling for L2 locality, div255 precision fix. Pixel format interchange.
 
 ### Benchmarking infrastructure
 
@@ -60,7 +60,7 @@ Items handled by these crates are noted inline. Aethersafta's scope is **orchest
 
 ---
 
-## v0.24.0 — Multi-Source & Capture
+## v0.24.4 — Multi-Source & Capture
 
 ### Multi-source capture
 - [ ] Concurrent capture from multiple sources (screen + camera + media)
@@ -84,23 +84,37 @@ Items handled by these crates are noted inline. Aethersafta's scope is **orchest
 
 ### Overlays
 - [ ] Text overlay with font rendering (position, size, color, background)
-- [ ] Image watermark with alpha channel
+- [ ] Image watermark with alpha channel via `ranga::composite::composite_at_argb`
 - [ ] Animated overlays (fade in/out, scroll)
 - [ ] Clock / timer overlay
 
 ### Transitions
+
+> **Delegated to ranga 0.24.3**: `gpu_dissolve`, `gpu_fade`, `gpu_wipe` compute shaders for cross-dissolve, fade-to-black, and horizontal wipe. CPU fallbacks via `ranga::composite::dissolve/fade/wipe`.
+
 - [ ] Cut (instant scene switch)
-- [ ] Crossfade via `ranga::composite`
-- [ ] Slide (push/reveal direction)
+- [ ] Crossfade via `ranga::composite::dissolve` / `ranga::gpu::gpu_dissolve`
+- [ ] Fade via `ranga::composite::fade` / `ranga::gpu::gpu_fade`
+- [ ] Wipe via `ranga::composite::wipe` / `ranga::gpu::gpu_wipe`
 - [ ] Configurable transition duration
+- [ ] GPU/CPU auto-selection via `ranga::should_use_gpu()`
 
 ### Per-layer color correction
 
-> **Delegated to ranga**: All color correction is handled by `ranga::filter` (brightness, contrast, saturation, hue shift, color temperature, 3D LUT, vignette) and `ranga::histogram` (auto white balance). Aethersafta wires these into the per-layer pipeline.
+> **Delegated to ranga 0.24.3**: All color correction handled by `ranga::filter` (brightness, contrast, saturation, hue shift, color temperature, 3D LUT, vignette, vibrance, color balance), `ranga::histogram` (equalize, auto-levels, auto white balance), and `ranga::icc` (ICC profile application for multi-camera color matching). GPU-accelerated paths via `ranga::gpu` (brightness_contrast, saturation, hue shift, color balance, 3D LUT, grayscale).
 
 - [ ] Integrate `ranga::filter` into compositor layer pipeline
 - [ ] Per-layer filter parameter API (runtime-adjustable)
-- [ ] Apply filters during blend pass to avoid extra full-frame pass
+- [ ] GPU filter chain via `ranga::gpu::GpuChain` — batch multiple filters without CPU readback
+- [ ] ICC profile per-source for multi-camera color matching via `ranga::icc`
+- [ ] Auto white balance / auto-levels as one-click presets
+
+### Per-layer transforms
+
+> **Delegated to ranga 0.24.3**: Perspective transform (`ranga::transform::perspective_transform`) and GPU geometry (`gpu_crop`, `gpu_resize`, `gpu_flip`).
+
+- [ ] Perspective correction per layer (4-corner mapping via `ranga::transform::Perspective`)
+- [ ] GPU-accelerated resize/crop/flip via `ranga::gpu`
 
 ### Scene switching API
 - [ ] Scene presets: named collections of layers + layout
@@ -136,13 +150,21 @@ Items handled by these crates are noted inline. Aethersafta's scope is **orchest
 - [ ] Alert when pipeline exceeds budget
 - [ ] Nazar integration for monitoring dashboard
 
+### GPU compositing pipeline
+
+> **Delegated to ranga 0.24.3**: `GpuChain` batched dispatch chains blend → filter → resize → transition operations without CPU readback between steps. `GpuContext` manages wgpu device/queue. `should_use_gpu()` now checks free VRAM and GPU utilization before recommending offload.
+
+- [ ] `GpuCompositor` mode using `ranga::gpu::GpuChain` for full-frame compositing
+- [ ] GPU blend all layers → GPU filter → GPU output in single dispatch chain
+- [ ] CPU/GPU compositor auto-selection based on `ranga::should_use_gpu()` and layer count
+- [ ] GPU noise generation via `ranga::gpu::gpu_noise_gaussian` (overlays, effects)
+
 ### Performance
 - [ ] Noise suppression (RNNoise or similar — not yet in dhvani, may need new crate or dhvani feature)
 - [ ] Zero-copy frame path (compositor → encoder without memcpy)
-- [ ] GPU-accelerated compositing via wgpu compute (leverage `ranga` gpu feature)
 - [ ] Memory pool for frame buffers (eliminate per-frame allocation)
 
-> **Delegated to ranga**: AVX2/NEON alpha blending (`ranga::blend` with `simd` feature).
+> **Delegated to ranga 0.24.3**: AVX2/NEON alpha blending (`ranga::blend` with `simd` feature), SIMD brightness/grayscale filters, cache-aware blur tiling for L2 locality, div255 precision fix eliminating cumulative brightness loss.
 
 ---
 
@@ -178,7 +200,8 @@ All of the following must be true before cutting 1.0:
 - [ ] Picture-in-picture layout presets
 - [ ] Virtual background (ML-based segmentation via hoosh)
 - [ ] Face tracking auto-zoom
-- [ ] Color matching between layers (match camera A to camera B for multi-cam)
+- [ ] Color matching between layers — ICC profile matching via `ranga::icc`, Oklab perceptual color space via `ranga::color::Oklab`
+- [ ] Spectral color science via `ranga::spectral` (prakash integration) — physically-based white point, CRI, blackbody
 
 > **Delegated to ranga**: Blur/sharpen (`ranga::filter`), vignette (`ranga::filter`).
 

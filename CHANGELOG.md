@@ -7,6 +7,55 @@ Pre-1.0 versioning uses `0.D.M` (day.month) SemVer.
 
 ---
 
+## [0.24.3] — 2026-03-24
+
+Code audit and scaffold hardening release: full DSP chain in graph pipeline, compositor buffer reuse, dependency cleanup, and Architecture Decision Records.
+
+### Changed
+
+- **Graph pipeline full DSP chain** — `DspChainNode` now supports all 7 per-source effects matching `AudioMixer::mix()` order: EQ (parametric or graphic) → noise gate → compressor → de-esser → delay → reverb → pan → sanitize → meter
+- **Graph source metering fixed** — per-source `PeakMeter` is now wired into graph execution via `Arc` sharing between `DspChainNode` and `AudioPipeline`, so `source_peak()` returns live values instead of always-zero
+- **BufferPool activated in mixer** — removed `#[allow(dead_code)]`, processed buffers are returned to the pool after mixing for reuse; public `acquire_buffer()`/`release_buffer()` API for callers to participate in pool allocation
+- **Compositor buffer reuse** — `Compositor` now stores a reusable scratch buffer; `compose()` takes `&mut self` and reuses the buffer across frames via `reclaim_buffer()` to eliminate per-frame heap allocation
+- **`serde_json` moved to dev-dependencies** — only used in tests, not library code
+
+### Removed
+
+- **`tokio`** dependency — unused (no async code yet), removes 36+ transitive crates
+- **`chrono`** dependency — unused, removes timezone/date transitive crates
+- **`thiserror`** dependency — unused (all errors use `anyhow`), removes derive macro crate
+- **`tokio-test`** dev-dependency — unused
+
+### Added
+
+- **Architecture Decision Records** (`docs/decisions/`):
+  - ADR-001: ARGB8888 as internal pixel format (vs NV12)
+  - ADR-002: SIMD delegation to ranga (vs inline intrinsics)
+  - ADR-003: tarang for encoding (vs direct FFI)
+
+### Dependencies
+
+| Crate | Old | New | Notes |
+|-------|-----|-----|-------|
+| ranga | 0.21.4 | 0.24.3 | GPU compute (GpuChain, transitions, geometry), Oklab/Oklch, BT.2020, perspective transforms, ICC profiles, histogram equalization, div255 precision fix, SIMD brightness/grayscale, cache-aware blur |
+
+### Inherited Fixes (via ranga 0.24.3)
+
+- **Compositing precision** — div255 rounding replaces `>> 8`, eliminating ~0.4% cumulative brightness loss per blend pass
+- **BT.709 Y coefficient** — white correctly maps to Y=255 (coefficient sum 255→256)
+- **YUV420p odd-dimension sizing** — `div_ceil(2)` for chroma planes, fixing undersized buffers
+- **Auto white balance** — clamped scale factors prevent extreme corrections
+- **NEON brightness OOB read** — fixed on aarch64
+
+### Code Quality
+
+- **Zero `unsafe` in src/** — confirmed during audit, no `unsafe` blocks in library or binary code
+- **Zero `unwrap()`/`expect()` in library code** — confirmed during audit, all in test code only
+- **`cargo audit`** clean, **`cargo deny`** clean, **`cargo clippy`** clean
+- Removed `#[allow(dead_code)]` from graph node structs/impls (now used or annotated intentionally)
+
+---
+
 ## [0.23.3] — 2026-03-23
 
 Audit and hardening release: ecosystem dependency upgrades, security fixes, performance optimization of color conversion hot paths, and project-wide annotation sweep.
