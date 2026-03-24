@@ -1,5 +1,8 @@
 # Build artifacts
 /target/
+/fuzz/target/
+/fuzz/corpus/
+/fuzz/artifacts/
 
 # Editor / IDE
 *.swp
@@ -25,6 +28,7 @@ coverage/
 
 # Benchmark output (generated, not tracked)
 criterion/
+benchmarks/
 
 # Environment / secrets
 .env

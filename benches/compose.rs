@@ -361,8 +361,12 @@ fn bench_opaque_vs_blend(c: &mut Criterion) {
 fn bench_resolution_scaling(c: &mut Criterion) {
     let mut group = c.benchmark_group("resolution_scaling");
 
-    let resolutions: &[(u32, u32, &str)] =
-        &[(854, 480, "480p"), (1280, 720, "720p"), (1920, 1080, "1080p"), (3840, 2160, "4K")];
+    let resolutions: &[(u32, u32, &str)] = &[
+        (854, 480, "480p"),
+        (1280, 720, "720p"),
+        (1920, 1080, "1080p"),
+        (3840, 2160, "4K"),
+    ];
 
     for &(w, h, label) in resolutions {
         let mut scene = SceneGraph::new(w, h, 30);
