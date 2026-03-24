@@ -417,6 +417,101 @@ fn bench_metering(c: &mut Criterion) {
     });
 }
 
+// ---------------------------------------------------------------------------
+// Graph-based AudioPipeline
+// ---------------------------------------------------------------------------
+
+fn bench_graph_pipeline(c: &mut Criterion) {
+    use aethersafta::audio::AudioPipeline;
+
+    let mut group = c.benchmark_group("graph_pipeline");
+
+    for &n_sources in &[1, 4, 8] {
+        group.bench_function(format!("{n_sources}_source"), |b| {
+            let mut pipeline = AudioPipeline::new(AudioMixerConfig {
+                master_limiter: false,
+                ..Default::default()
+            });
+            for i in 0..n_sources {
+                let id = uuid::Uuid::from_u128(i as u128);
+                pipeline.add_source(id, 1.0, 0.0);
+            }
+
+            b.iter(|| pipeline.process())
+        });
+    }
+    group.finish();
+}
+
+// ---------------------------------------------------------------------------
+// Buffer pool: acquire / fill / mix / release cycle
+// ---------------------------------------------------------------------------
+
+fn bench_buffer_pool(c: &mut Criterion) {
+    let mut group = c.benchmark_group("buffer_pool");
+
+    group.bench_function("acquire_release_cycle", |b| {
+        let mut mixer = AudioMixer::new(AudioMixerConfig {
+            master_limiter: false,
+            ..Default::default()
+        });
+        let id = mixer.add_source(AudioSourceConfig::new("Src"));
+
+        b.iter(|| {
+            let mut buffers = HashMap::new();
+            buffers.insert(id, test_buffer(0.5, 1024));
+            let output = mixer.mix(&mut buffers);
+            drop(output);
+        })
+    });
+
+    group.bench_function("acquire_release_8_sources", |b| {
+        let mut mixer = AudioMixer::new(AudioMixerConfig {
+            master_limiter: false,
+            ..Default::default()
+        });
+        let ids: Vec<_> = (0..8)
+            .map(|i| mixer.add_source(AudioSourceConfig::new(format!("Src-{i}"))))
+            .collect();
+
+        b.iter(|| {
+            let mut buffers = HashMap::new();
+            for &id in &ids {
+                buffers.insert(id, test_buffer(0.5, 1024));
+            }
+            let output = mixer.mix(&mut buffers);
+            drop(output);
+        })
+    });
+
+    group.finish();
+}
+
+// ---------------------------------------------------------------------------
+// Mix throughput across buffer sizes
+// ---------------------------------------------------------------------------
+
+fn bench_mix_buffer_sizes(c: &mut Criterion) {
+    let mut group = c.benchmark_group("mix_buffer_sizes");
+
+    for &frames in &[64, 128, 256, 512, 1024, 2048, 4096] {
+        let mut mixer = AudioMixer::new(AudioMixerConfig {
+            master_limiter: false,
+            ..Default::default()
+        });
+        let id = mixer.add_source(AudioSourceConfig::new("Src"));
+
+        group.bench_with_input(BenchmarkId::new("frames", frames), &frames, |b, &frames| {
+            b.iter(|| {
+                let mut buffers = HashMap::new();
+                buffers.insert(id, test_buffer(0.5, frames));
+                mixer.mix(&mut buffers)
+            })
+        });
+    }
+    group.finish();
+}
+
 criterion_group!(
     benches,
     bench_mix_single_source,
@@ -424,5 +519,8 @@ criterion_group!(
     bench_mix_with_dsp,
     bench_master_limiter,
     bench_metering,
+    bench_graph_pipeline,
+    bench_buffer_pool,
+    bench_mix_buffer_sizes,
 );
 criterion_main!(benches);

@@ -80,7 +80,7 @@ fn latency_budget_headroom() {
 #[test]
 fn raw_frame_validation() {
     let valid = RawFrame {
-        data: vec![0u8; 100 * 100 * 4],
+        data: vec![0u8; 100 * 100 * 4].into(),
         format: PixelFormat::Argb8888,
         width: 100,
         height: 100,
@@ -89,7 +89,7 @@ fn raw_frame_validation() {
     assert!(valid.is_valid());
 
     let invalid = RawFrame {
-        data: vec![0u8; 10],
+        data: vec![0u8; 10].into(),
         format: PixelFormat::Argb8888,
         width: 100,
         height: 100,
@@ -294,7 +294,7 @@ fn file_output_pipeline() {
         let composited = compositor.compose(&scene, &frames, clock.current_pts_us());
 
         let packet = crate::output::EncodedPacket {
-            data: composited.data,
+            data: composited.data.to_vec(),
             pts_us: composited.pts_us,
             dts_us: composited.pts_us,
             is_keyframe: true,
@@ -620,6 +620,45 @@ fn source_config_serialization_roundtrip() {
     assert!((back.gain_db - (-6.0)).abs() < f32::EPSILON);
     assert!(back.muted);
     assert!((back.pan - (-0.5)).abs() < f32::EPSILON);
+}
+
+#[test]
+fn memory_stability_buffer_reclaim() {
+    use crate::scene::{LayerContent, compositor::Compositor};
+    use crate::source::synthetic::{Pattern, SyntheticSource};
+
+    let src = SyntheticSource::new("mem", 1920, 1080, 30, Pattern::Solid([255, 128, 64, 255]));
+    let mut scene = SceneGraph::new(1920, 1080, 30);
+    let layer = Layer::new(
+        "src",
+        LayerContent::Source {
+            source_id: src.id(),
+        },
+    );
+    let lid = layer.id;
+    scene.add_layer(layer);
+
+    let mut compositor = Compositor::new(1920, 1080);
+
+    // Run 300 frames (10s at 30fps) with buffer reclaim
+    for i in 0..300 {
+        let frame = src.capture_frame().unwrap().unwrap();
+        let mut frames = HashMap::new();
+        frames.insert(lid, frame);
+        let composited = compositor.compose(&scene, &frames, i * 33333);
+        assert!(composited.is_valid());
+        compositor.reclaim_buffer(composited.data);
+    }
+
+    // The compositor should have a reusable scratch buffer (not growing)
+    // Verify it still works after many cycles
+    let frame = src.capture_frame().unwrap().unwrap();
+    let mut frames = HashMap::new();
+    frames.insert(lid, frame);
+    let final_frame = compositor.compose(&scene, &frames, 300 * 33333);
+    assert!(final_frame.is_valid());
+    assert_eq!(final_frame.width, 1920);
+    assert_eq!(final_frame.height, 1080);
 }
 
 #[test]

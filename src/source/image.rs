@@ -5,6 +5,7 @@
 
 use std::path::{Path, PathBuf};
 
+use bytes::Bytes;
 use image::ImageReader;
 use uuid::Uuid;
 
@@ -47,7 +48,7 @@ impl ImageSource {
             name,
             path: path.to_path_buf(),
             frame: RawFrame {
-                data: argb,
+                data: Bytes::from(argb),
                 format: PixelFormat::Argb8888,
                 width,
                 height,
@@ -64,7 +65,7 @@ impl ImageSource {
             name: name.into(),
             path: PathBuf::new(),
             frame: RawFrame {
-                data,
+                data: Bytes::from(data),
                 format: PixelFormat::Argb8888,
                 width,
                 height,

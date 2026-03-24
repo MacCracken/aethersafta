@@ -103,7 +103,7 @@ impl Compositor {
         }
 
         RawFrame {
-            data: buffer,
+            data: buffer.into(),
             format: PixelFormat::Argb8888,
             width: self.width,
             height: self.height,
@@ -124,8 +124,13 @@ impl Compositor {
     /// // ... encode frame ...
     /// comp.reclaim_buffer(frame.data);
     /// ```
-    pub fn reclaim_buffer(&mut self, buf: Vec<u8>) {
-        self.scratch = buf;
+    pub fn reclaim_buffer(&mut self, buf: bytes::Bytes) {
+        // Try to recover the underlying Vec without copying. This succeeds when
+        // the Bytes has a single owner (typical: frame consumed after encoding).
+        if let Ok(mut_buf) = buf.try_into_mut() {
+            self.scratch = mut_buf.into();
+        }
+        // If multiple owners exist, discard — next compose() will allocate.
     }
 
     #[inline]
@@ -207,7 +212,7 @@ impl Compositor {
         let scaled_data;
         let (src_data, src_w, src_h) = if needs_scale {
             let argb_buf = ranga::pixel::PixelBuffer::new(
-                frame.data.clone(),
+                frame.data.to_vec(),
                 fw,
                 fh,
                 ranga::pixel::PixelFormat::Argb8,
@@ -341,7 +346,7 @@ mod tests {
         scene.add_layer(layer);
 
         let src_frame = RawFrame {
-            data: vec![255u8; 2 * 2 * 4],
+            data: vec![255u8; 2 * 2 * 4].into(),
             format: PixelFormat::Argb8888,
             width: 2,
             height: 2,
@@ -467,7 +472,7 @@ mod tests {
 
         // White opaque source
         let src_frame = RawFrame {
-            data: vec![255u8; 8 * 8 * 4],
+            data: vec![255u8; 8 * 8 * 4].into(),
             format: PixelFormat::Argb8888,
             width: 8,
             height: 8,
@@ -501,7 +506,7 @@ mod tests {
 
         // 8x8 opaque white source frame
         let src_frame = RawFrame {
-            data: vec![255u8; 8 * 8 * 4],
+            data: vec![255u8; 8 * 8 * 4].into(),
             format: PixelFormat::Argb8888,
             width: 8,
             height: 8,
@@ -636,7 +641,7 @@ mod tests {
 
         // Single pixel: ARGB = [255, 128, 64, 32]
         let src_frame = RawFrame {
-            data: vec![255, 128, 64, 32],
+            data: vec![255u8, 128, 64, 32].into(),
             format: PixelFormat::Argb8888,
             width: 1,
             height: 1,
@@ -835,9 +840,10 @@ mod tests {
         // pixel 0: fully opaque white, pixel 1: half-alpha red
         let src_frame = RawFrame {
             data: vec![
-                255, 255, 255, 255, // ARGB: opaque white
+                255u8, 255, 255, 255, // ARGB: opaque white
                 128, 200, 0, 0, // ARGB: half-alpha red
-            ],
+            ]
+            .into(),
             format: PixelFormat::Argb8888,
             width: 2,
             height: 1,
@@ -887,8 +893,9 @@ mod tests {
         // Tiny 2x2 opaque red source
         let src_frame = RawFrame {
             data: vec![
-                255, 255, 0, 0, 255, 255, 0, 0, 255, 255, 0, 0, 255, 255, 0, 0,
-            ],
+                255u8, 255, 0, 0, 255, 255, 0, 0, 255, 255, 0, 0, 255, 255, 0, 0,
+            ]
+            .into(),
             format: PixelFormat::Argb8888,
             width: 2,
             height: 2,
@@ -924,8 +931,9 @@ mod tests {
 
         let src_frame = RawFrame {
             data: vec![
-                255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255,
-            ],
+                255u8, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255,
+            ]
+            .into(),
             format: PixelFormat::Argb8888,
             width: 2,
             height: 2,
@@ -969,7 +977,7 @@ mod tests {
             }
         }
         let src_frame = RawFrame {
-            data,
+            data: data.into(),
             format: PixelFormat::Argb8888,
             width: 4,
             height: 4,
@@ -1014,7 +1022,7 @@ mod tests {
 
         // Provide frames for both
         let white_frame = RawFrame {
-            data: vec![255; 2 * 2 * 4],
+            data: vec![255u8; 2 * 2 * 4].into(),
             format: PixelFormat::Argb8888,
             width: 2,
             height: 2,
@@ -1081,5 +1089,120 @@ mod tests {
         assert!(g < 10, "green should be near zero, got G={}", g);
         // Alpha should be non-trivial from blending
         assert!(a > 80, "expected meaningful alpha, got A={}", a);
+    }
+}
+
+#[cfg(test)]
+mod proptests {
+    use super::*;
+    use crate::scene::{Layer, LayerContent, SceneGraph};
+    use proptest::prelude::*;
+
+    fn arb_layer() -> impl Strategy<Value = Layer> {
+        (
+            -200i32..=200,                // x
+            -200i32..=200,                // y
+            1u32..=64,                    // w
+            1u32..=64,                    // h
+            0.0f32..=1.0,                 // opacity
+            prop::bool::ANY,              // visible
+            -10i32..=10,                  // z_index
+            prop::array::uniform4(0u8..), // color
+        )
+            .prop_map(|(x, y, w, h, opacity, visible, z_index, color)| {
+                let mut layer = Layer::new("prop", LayerContent::ColorFill { color });
+                layer.position = (x, y);
+                layer.size = Some((w, h));
+                layer.opacity = opacity;
+                layer.visible = visible;
+                layer.z_index = z_index;
+                layer
+            })
+    }
+
+    proptest! {
+        #[test]
+        fn compositor_never_panics(
+            canvas_w in 1u32..=128,
+            canvas_h in 1u32..=128,
+            layers in proptest::collection::vec(arb_layer(), 0..=8),
+        ) {
+            let mut scene = SceneGraph::new(canvas_w, canvas_h, 30);
+            for layer in layers {
+                scene.add_layer(layer);
+            }
+            let mut comp = Compositor::new(canvas_w, canvas_h);
+            let frame = comp.compose(&scene, &HashMap::new(), 0);
+
+            // Must always produce a valid frame
+            prop_assert!(frame.is_valid());
+            prop_assert_eq!(frame.width, canvas_w);
+            prop_assert_eq!(frame.height, canvas_h);
+        }
+
+        #[test]
+        fn hidden_layers_produce_same_as_empty(
+            canvas_w in 1u32..=64,
+            canvas_h in 1u32..=64,
+            color in prop::array::uniform4(0u8..),
+        ) {
+            let mut scene = SceneGraph::new(canvas_w, canvas_h, 30);
+            let mut layer = Layer::new("hidden", LayerContent::ColorFill { color });
+            layer.visible = false;
+            scene.add_layer(layer);
+
+            let mut comp = Compositor::new(canvas_w, canvas_h);
+            let frame = comp.compose(&scene, &HashMap::new(), 0);
+
+            // Hidden layer → all zeros
+            prop_assert!(frame.data.iter().all(|&b| b == 0));
+        }
+
+        #[test]
+        fn zero_opacity_produces_same_as_empty(
+            canvas_w in 1u32..=64,
+            canvas_h in 1u32..=64,
+            r in 0u8..,
+            g in 0u8..,
+            b in 0u8..,
+        ) {
+            let mut scene = SceneGraph::new(canvas_w, canvas_h, 30);
+            let mut layer = Layer::new(
+                "ghost",
+                LayerContent::ColorFill { color: [r, g, b, 255] },
+            );
+            layer.opacity = 0.0;
+            scene.add_layer(layer);
+
+            let mut comp = Compositor::new(canvas_w, canvas_h);
+            let frame = comp.compose(&scene, &HashMap::new(), 0);
+            prop_assert!(frame.data.iter().all(|&b| b == 0));
+        }
+
+        #[test]
+        fn opaque_fill_covers_entire_canvas(
+            canvas_w in 1u32..=64,
+            canvas_h in 1u32..=64,
+            r in 0u8..,
+            g in 0u8..,
+            b in 0u8..,
+        ) {
+            let mut scene = SceneGraph::new(canvas_w, canvas_h, 30);
+            scene.add_layer(Layer::new(
+                "fill",
+                LayerContent::ColorFill { color: [r, g, b, 255] },
+            ));
+
+            let mut comp = Compositor::new(canvas_w, canvas_h);
+            let frame = comp.compose(&scene, &HashMap::new(), 0);
+
+            // Every pixel: ARGB = [255, r, g, b]
+            for chunk in frame.data.chunks_exact(4) {
+                prop_assert_eq!(chunk[0], 255);
+                prop_assert_eq!(chunk[1], r);
+                prop_assert_eq!(chunk[2], g);
+                prop_assert_eq!(chunk[3], b);
+            }
+        }
     }
 }

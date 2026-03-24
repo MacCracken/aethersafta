@@ -18,7 +18,7 @@ fn make_argb_frame(width: u32, height: u32, pts_us: u64) -> aethersafta::source:
         chunk[3] = ((x + y) % 256) as u8; // B
     }
     aethersafta::source::RawFrame {
-        data,
+        data: data.into(),
         format: aethersafta::source::PixelFormat::Argb8888,
         width,
         height,

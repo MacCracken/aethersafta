@@ -63,6 +63,7 @@ dhvani = { version = "0.22.4", default-features = false, features = ["dsp", "gra
 tempfile = "3"
 serde_json = "1"
 criterion = { version = "0.8", features = ["html_reports"] }
+proptest = "1"
 
 [[bench]]
 name = "compose"
@@ -78,6 +79,14 @@ harness = false
 
 [[bench]]
 name = "convert"
+harness = false
+
+[[bench]]
+name = "latency"
+harness = false
+
+[[bench]]
+name = "output"
 harness = false
 
 # Patch cros-libva for libva >= 1.23 compatibility (VP9 struct fields added upstream)

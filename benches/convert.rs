@@ -100,11 +100,58 @@ fn bench_nv12_roundtrip(c: &mut Criterion) {
     group.finish();
 }
 
+// ---------------------------------------------------------------------------
+// Roundtrip: ARGB → YUV420p (forward only, no inverse exists)
+// ---------------------------------------------------------------------------
+
+fn bench_yuv420p_roundtrip(c: &mut Criterion) {
+    let mut group = c.benchmark_group("yuv420p_roundtrip");
+    for &(w, h, label) in &[
+        (640, 480, "480p"),
+        (1280, 720, "720p"),
+        (1920, 1080, "1080p"),
+        (3840, 2160, "4K"),
+    ] {
+        let argb = make_argb(w, h);
+        group.bench_with_input(BenchmarkId::new("argb_yuv420p", label), &(), |b, _| {
+            b.iter(|| argb_to_yuv420p(&argb, w, h))
+        });
+    }
+    group.finish();
+}
+
+// ---------------------------------------------------------------------------
+// Odd dimensions: stress div_ceil edge cases
+// ---------------------------------------------------------------------------
+
+fn bench_odd_dimensions(c: &mut Criterion) {
+    let mut group = c.benchmark_group("odd_dimension_convert");
+    for &(w, h, label) in &[
+        (1u32, 1u32, "1x1"),
+        (3, 3, "3x3"),
+        (7, 5, "7x5"),
+        (99, 99, "99x99"),
+        (1279, 719, "1279x719"),
+        (1921, 1081, "1921x1081"),
+    ] {
+        let argb = make_argb(w, h);
+        group.bench_with_input(BenchmarkId::new("argb_to_yuv420p", label), &(), |b, _| {
+            b.iter(|| argb_to_yuv420p(&argb, w, h))
+        });
+        group.bench_with_input(BenchmarkId::new("argb_to_nv12", label), &(), |b, _| {
+            b.iter(|| argb_to_nv12(&argb, w, h))
+        });
+    }
+    group.finish();
+}
+
 criterion_group!(
     benches,
     bench_argb_to_yuv420p,
     bench_argb_to_nv12,
     bench_nv12_to_argb,
     bench_nv12_roundtrip,
+    bench_yuv420p_roundtrip,
+    bench_odd_dimensions,
 );
 criterion_main!(benches);

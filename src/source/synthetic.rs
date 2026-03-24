@@ -5,6 +5,7 @@
 
 use std::sync::atomic::{AtomicU64, Ordering};
 
+use bytes::Bytes;
 use uuid::Uuid;
 
 use super::{PixelFormat, RawFrame, Source, SourceId};
@@ -90,7 +91,7 @@ impl SyntheticSource {
         }
 
         RawFrame {
-            data,
+            data: Bytes::from(data),
             format: PixelFormat::Argb8888,
             width: self.width,
             height: self.height,

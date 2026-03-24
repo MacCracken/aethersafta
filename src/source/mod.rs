@@ -3,6 +3,7 @@
 pub mod image;
 pub mod synthetic;
 
+use bytes::Bytes;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -20,10 +21,13 @@ pub enum PixelFormat {
 }
 
 /// A raw uncompressed frame from a source.
+///
+/// Uses [`bytes::Bytes`] for the pixel buffer, enabling O(1) clones
+/// when sharing frame data (e.g. static image sources).
 #[derive(Debug, Clone)]
 pub struct RawFrame {
-    /// Raw pixel data.
-    pub data: Vec<u8>,
+    /// Raw pixel data. O(1) clone via reference counting.
+    pub data: Bytes,
     /// Pixel format.
     pub format: PixelFormat,
     /// Width in pixels.
@@ -102,7 +106,7 @@ mod tests {
     #[test]
     fn raw_frame_valid() {
         let frame = RawFrame {
-            data: vec![0u8; 1920 * 1080 * 4],
+            data: Bytes::from(vec![0u8; 1920 * 1080 * 4]),
             format: PixelFormat::Argb8888,
             width: 1920,
             height: 1080,
@@ -114,7 +118,7 @@ mod tests {
     #[test]
     fn raw_frame_invalid_size() {
         let frame = RawFrame {
-            data: vec![0u8; 100],
+            data: Bytes::from(vec![0u8; 100]),
             format: PixelFormat::Argb8888,
             width: 1920,
             height: 1080,
@@ -136,7 +140,7 @@ mod tests {
     fn nv12_frame_valid() {
         let size = RawFrame::expected_size_for(PixelFormat::Nv12, 4, 4);
         let frame = RawFrame {
-            data: vec![128u8; size],
+            data: Bytes::from(vec![128u8; size]),
             format: PixelFormat::Nv12,
             width: 4,
             height: 4,
@@ -154,7 +158,7 @@ mod tests {
     #[test]
     fn raw_frame_1x1_argb() {
         let frame = RawFrame {
-            data: vec![0u8; 4],
+            data: Bytes::from(vec![0u8; 4]),
             format: PixelFormat::Argb8888,
             width: 1,
             height: 1,
@@ -171,7 +175,7 @@ mod tests {
         let size = RawFrame::expected_size_for(PixelFormat::Nv12, 3, 3);
         assert_eq!(size, 9 + 3); // Y=3*3=9, UV=3*(3/2)=3
         let frame = RawFrame {
-            data: vec![0u8; size],
+            data: Bytes::from(vec![0u8; size]),
             format: PixelFormat::Nv12,
             width: 3,
             height: 3,
