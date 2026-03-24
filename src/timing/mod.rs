@@ -213,6 +213,91 @@ mod tests {
         assert_eq!(budget.headroom_us(), budget.target.as_micros() as i64);
     }
 
+    // --- Additional coverage tests ---
+
+    #[test]
+    fn frame_clock_zero_fps_no_panic() {
+        // fps=0 should be handled via max(1), producing 1fps
+        let clock = FrameClock::new(0);
+        assert_eq!(clock.fps(), 0);
+        // frame_duration uses fps.max(1) so it should be 1s
+        assert_eq!(clock.frame_duration().as_secs(), 1);
+        assert_eq!(clock.current_pts_us(), 0);
+    }
+
+    #[test]
+    fn frame_clock_elapsed_before_tick() {
+        // Before any tick, start_time is None, elapsed should be ZERO
+        let clock = FrameClock::new(30);
+        assert_eq!(clock.elapsed(), Duration::ZERO);
+    }
+
+    #[test]
+    fn frame_clock_elapsed_after_tick() {
+        // After tick, start_time is Some, elapsed should be non-negative
+        let mut clock = FrameClock::new(30);
+        clock.tick();
+        // elapsed() should return a small positive duration (just ticked)
+        let e = clock.elapsed();
+        assert!(
+            e < Duration::from_secs(1),
+            "elapsed should be tiny, got {:?}",
+            e
+        );
+    }
+
+    #[test]
+    fn frame_clock_current_pts_us_at_high_frame_count() {
+        // Test pts calculation with many ticks — checks multiplication correctness
+        let mut clock = FrameClock::new(30);
+        for _ in 0..1000 {
+            clock.tick();
+        }
+        let pts = clock.current_pts_us();
+        // 1000 frames at 30fps = ~33.33s = ~33_333_333 us
+        assert!(
+            (33_000_000..=34_000_000).contains(&pts),
+            "Expected PTS ~33.3s, got {} us",
+            pts
+        );
+    }
+
+    #[test]
+    fn frame_clock_current_pts_us_before_tick() {
+        // frame_count = 0 means pts = 0
+        let clock = FrameClock::new(60);
+        assert_eq!(clock.current_pts_us(), 0);
+    }
+
+    #[test]
+    fn frame_clock_is_behind_no_start() {
+        // No ticks => no start_time => not behind
+        let clock = FrameClock::new(30);
+        assert!(!clock.is_behind());
+    }
+
+    #[test]
+    fn frame_clock_tick_sets_start_time_once() {
+        // First tick sets start_time, second tick does not reset it
+        let mut clock = FrameClock::new(60);
+        clock.tick();
+        let e1 = clock.elapsed();
+        // Tick again — elapsed should only grow, not reset
+        clock.tick();
+        let e2 = clock.elapsed();
+        assert!(e2 >= e1);
+        assert_eq!(clock.frame_count(), 2);
+    }
+
+    #[test]
+    fn frame_clock_1fps() {
+        let mut clock = FrameClock::new(1);
+        assert_eq!(clock.frame_duration(), Duration::from_secs(1));
+        clock.tick();
+        let pts = clock.current_pts_us();
+        assert_eq!(pts, 1_000_000);
+    }
+
     #[test]
     fn latency_budget_exact() {
         let mut budget = LatencyBudget::new(Duration::from_micros(33333));

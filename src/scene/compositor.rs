@@ -639,6 +639,371 @@ mod tests {
         assert_eq!(&frame.data[last..last + 4], [255, 0, 128, 255]);
     }
 
+    // --- Additional coverage tests ---
+
+    #[test]
+    fn clip_rect_fully_negative_returns_none() {
+        // Layer entirely to the left/above the canvas
+        assert!(ClipRect::compute(-10, -10, 5, 5, 100, 100).is_none());
+    }
+
+    #[test]
+    fn clip_rect_zero_size_returns_none() {
+        assert!(ClipRect::compute(0, 0, 0, 0, 100, 100).is_none());
+        assert!(ClipRect::compute(0, 0, 0, 10, 100, 100).is_none());
+        assert!(ClipRect::compute(0, 0, 10, 0, 100, 100).is_none());
+    }
+
+    #[test]
+    fn clip_rect_very_large_dimensions() {
+        // Layer extends far beyond canvas — should clamp to canvas size
+        let clip = ClipRect::compute(0, 0, u32::MAX, u32::MAX, 100, 100).unwrap();
+        assert_eq!(clip.x0, 0);
+        assert_eq!(clip.y0, 0);
+        assert_eq!(clip.w, 100);
+        assert_eq!(clip.h, 100);
+    }
+
+    #[test]
+    fn clip_rect_large_negative_position_with_large_size() {
+        // Position is very negative but size is huge — only the overlap shows
+        let clip =
+            ClipRect::compute(-1_000_000, -1_000_000, 1_000_010, 1_000_010, 100, 100).unwrap();
+        assert_eq!(clip.x0, 0);
+        assert_eq!(clip.y0, 0);
+        assert_eq!(clip.w, 10);
+        assert_eq!(clip.h, 10);
+    }
+
+    #[test]
+    fn clip_rect_exactly_at_boundary() {
+        // Layer starts exactly at right/bottom edge — zero visible area
+        assert!(ClipRect::compute(100, 0, 10, 10, 100, 100).is_none());
+        assert!(ClipRect::compute(0, 100, 10, 10, 100, 100).is_none());
+        // Layer ends exactly at right/bottom edge — fully visible
+        let clip = ClipRect::compute(90, 90, 10, 10, 100, 100).unwrap();
+        assert_eq!(clip.w, 10);
+        assert_eq!(clip.h, 10);
+    }
+
+    #[test]
+    fn clip_rect_i32_overflow_protection() {
+        // Position + size would overflow i32 — i64 arithmetic should handle it
+        let clip = ClipRect::compute(i32::MAX - 5, 0, 100, 10, 200, 200);
+        // x0 = i32::MAX - 5 which is > 200, so should be None
+        assert!(clip.is_none());
+    }
+
+    #[test]
+    fn color_fill_opacity_near_one() {
+        // Opacity very close to 1.0 — tests the eff_a >= 254 fast path boundary
+        let comp = Compositor::new(2, 2);
+        let mut scene = SceneGraph::new(2, 2, 30);
+        let mut layer = Layer::new(
+            "almost_opaque",
+            LayerContent::ColorFill {
+                color: [0, 255, 0, 255],
+            },
+        );
+        // 254/255 ~= 0.996 -> eff_a should be ~254, hitting the fast path
+        layer.opacity = 254.0 / 255.0;
+        scene.add_layer(layer);
+
+        let frame = comp.compose(&scene, &HashMap::new(), 0);
+        // Should be essentially fully opaque green in ARGB: [A, R, G, B]
+        for chunk in frame.data.chunks_exact(4) {
+            assert!(chunk[0] >= 253, "A should be ~255, got {}", chunk[0]);
+            assert_eq!(chunk[1], 0, "R should be 0");
+            assert!(chunk[2] >= 253, "G should be ~255, got {}", chunk[2]);
+            assert_eq!(chunk[3], 0, "B should be 0");
+        }
+    }
+
+    #[test]
+    fn color_fill_very_low_opacity() {
+        // Opacity just above 0 — should produce faint blend (slow path)
+        let comp = Compositor::new(2, 2);
+        let mut scene = SceneGraph::new(2, 2, 30);
+        let mut layer = Layer::new(
+            "faint",
+            LayerContent::ColorFill {
+                color: [255, 0, 0, 255],
+            },
+        );
+        layer.opacity = 0.02;
+        scene.add_layer(layer);
+
+        let frame = comp.compose(&scene, &HashMap::new(), 0);
+        // Should be very dim red — non-zero but small values
+        for chunk in frame.data.chunks_exact(4) {
+            assert!(chunk[0] < 20, "A should be small, got {}", chunk[0]);
+        }
+    }
+
+    #[test]
+    fn color_fill_zero_alpha_in_color() {
+        // Color itself has alpha=0 — effective alpha should be 0, early return
+        let comp = Compositor::new(2, 2);
+        let mut scene = SceneGraph::new(2, 2, 30);
+        scene.add_layer(Layer::new(
+            "noalpha",
+            LayerContent::ColorFill {
+                color: [255, 0, 0, 0],
+            },
+        ));
+
+        let frame = comp.compose(&scene, &HashMap::new(), 0);
+        assert!(
+            frame.data.iter().all(|&b| b == 0),
+            "zero-alpha color should produce no change"
+        );
+    }
+
+    #[test]
+    fn color_fill_with_explicit_size() {
+        // Explicitly sized color fill smaller than canvas
+        let comp = Compositor::new(4, 4);
+        let mut scene = SceneGraph::new(4, 4, 30);
+        let mut layer = Layer::new(
+            "sized",
+            LayerContent::ColorFill {
+                color: [255, 255, 255, 255],
+            },
+        );
+        layer.size = Some((2, 2));
+        layer.position = (0, 0);
+        scene.add_layer(layer);
+
+        let frame = comp.compose(&scene, &HashMap::new(), 0);
+        // (0,0) should be white ARGB
+        assert_eq!(&frame.data[0..4], [255, 255, 255, 255]);
+        // (3,3) should be transparent
+        let idx = (3 * 4 + 3) * 4;
+        assert_eq!(&frame.data[idx..idx + 4], [0, 0, 0, 0]);
+    }
+
+    #[test]
+    fn frame_with_partial_alpha_pixels() {
+        // Source frame with mixed alpha — exercises the non-all-opaque path at full opacity
+        let comp = Compositor::new(2, 1);
+        let mut scene = SceneGraph::new(2, 1, 30);
+        let layer = Layer::new(
+            "mixed",
+            LayerContent::Source {
+                source_id: uuid::Uuid::nil(),
+            },
+        );
+        let lid = layer.id;
+        scene.add_layer(layer);
+
+        // pixel 0: fully opaque white, pixel 1: half-alpha red
+        let src_frame = RawFrame {
+            data: vec![
+                255, 255, 255, 255, // ARGB: opaque white
+                128, 200, 0, 0, // ARGB: half-alpha red
+            ],
+            format: PixelFormat::Argb8888,
+            width: 2,
+            height: 1,
+            pts_us: 0,
+        };
+        let mut frames = HashMap::new();
+        frames.insert(lid, src_frame);
+
+        let result = comp.compose(&scene, &frames, 0);
+        assert!(result.is_valid());
+        // Pixel 0 should be opaque white (all-opaque path hits copy)
+        // But row has mixed alpha so blend_row_alpha is called for the whole row
+        assert!(result.data[0] > 0, "should have alpha");
+    }
+
+    #[test]
+    fn frame_layer_no_matching_frame_is_noop() {
+        // Source layer with no frame in the map — should not crash, buffer stays zero
+        let comp = Compositor::new(4, 4);
+        let mut scene = SceneGraph::new(4, 4, 30);
+        scene.add_layer(Layer::new(
+            "missing",
+            LayerContent::Source {
+                source_id: uuid::Uuid::nil(),
+            },
+        ));
+
+        let frame = comp.compose(&scene, &HashMap::new(), 0);
+        assert!(frame.data.iter().all(|&b| b == 0));
+    }
+
+    #[test]
+    fn scaled_upscale_layer() {
+        // Source is 2x2, layer size is 8x8 — upscale path
+        let comp = Compositor::new(8, 8);
+        let mut scene = SceneGraph::new(8, 8, 30);
+        let mut layer = Layer::new(
+            "upscaled",
+            LayerContent::Source {
+                source_id: uuid::Uuid::nil(),
+            },
+        );
+        layer.size = Some((8, 8));
+        let lid = layer.id;
+        scene.add_layer(layer);
+
+        // Tiny 2x2 opaque red source
+        let src_frame = RawFrame {
+            data: vec![
+                255, 255, 0, 0, 255, 255, 0, 0, 255, 255, 0, 0, 255, 255, 0, 0,
+            ],
+            format: PixelFormat::Argb8888,
+            width: 2,
+            height: 2,
+            pts_us: 0,
+        };
+        let mut frames = HashMap::new();
+        frames.insert(lid, src_frame);
+
+        let result = comp.compose(&scene, &frames, 0);
+        assert!(result.is_valid());
+        // The 8x8 output should be filled with reddish pixels from bicubic upscale
+        let center = (4 * 8 + 4) * 4;
+        assert!(
+            result.data[center] > 200,
+            "center pixel should be mostly opaque after upscale"
+        );
+    }
+
+    #[test]
+    fn frame_layer_partial_opacity_with_blend() {
+        // Frame layer at 50% opacity — exercises the opacity_fp < 256 branch
+        let comp = Compositor::new(2, 2);
+        let mut scene = SceneGraph::new(2, 2, 30);
+        let mut layer = Layer::new(
+            "half_src",
+            LayerContent::Source {
+                source_id: uuid::Uuid::nil(),
+            },
+        );
+        layer.opacity = 0.5;
+        let lid = layer.id;
+        scene.add_layer(layer);
+
+        let src_frame = RawFrame {
+            data: vec![
+                255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255,
+            ],
+            format: PixelFormat::Argb8888,
+            width: 2,
+            height: 2,
+            pts_us: 0,
+        };
+        let mut frames = HashMap::new();
+        frames.insert(lid, src_frame);
+
+        let result = comp.compose(&scene, &frames, 0);
+        assert!(result.is_valid());
+        // 50% white over black should give ~128 per channel
+        for chunk in result.data.chunks_exact(4) {
+            assert!(
+                chunk[1] > 100 && chunk[1] < 180,
+                "R should be ~128, got {}",
+                chunk[1]
+            );
+        }
+    }
+
+    #[test]
+    fn frame_layer_negative_position_clips_source() {
+        // Frame placed at negative coords — tests src_x0/src_y0 offset calculations
+        let comp = Compositor::new(4, 4);
+        let mut scene = SceneGraph::new(4, 4, 30);
+        let mut layer = Layer::new(
+            "neg_frame",
+            LayerContent::Source {
+                source_id: uuid::Uuid::nil(),
+            },
+        );
+        layer.position = (-1, -1);
+        let lid = layer.id;
+        scene.add_layer(layer);
+
+        // 4x4 frame, each pixel ARGB opaque with different R values by row
+        let mut data = Vec::with_capacity(4 * 4 * 4);
+        for row in 0..4u8 {
+            for _col in 0..4u8 {
+                data.extend_from_slice(&[255, row * 50, 0, 0]);
+            }
+        }
+        let src_frame = RawFrame {
+            data,
+            format: PixelFormat::Argb8888,
+            width: 4,
+            height: 4,
+            pts_us: 0,
+        };
+        let mut frames = HashMap::new();
+        frames.insert(lid, src_frame);
+
+        let result = comp.compose(&scene, &frames, 0);
+        assert!(result.is_valid());
+        // (0,0) in output corresponds to (1,1) in source
+        // Source row 1 has R = 50
+        assert_eq!(result.data[0], 255); // alpha
+        assert_eq!(result.data[1], 50); // R from source row 1
+    }
+
+    #[test]
+    fn image_and_text_layers_need_frames() {
+        // Image and Text content types also go through blend_frame
+        let comp = Compositor::new(2, 2);
+        let mut scene = SceneGraph::new(2, 2, 30);
+
+        let img_layer = Layer::new(
+            "img",
+            LayerContent::Image {
+                path: "test.png".into(),
+            },
+        );
+        let img_id = img_layer.id;
+        scene.add_layer(img_layer);
+
+        let txt_layer = Layer::new(
+            "txt",
+            LayerContent::Text {
+                text: "hi".into(),
+                font_size: 12.0,
+                color: [255, 255, 255, 255],
+            },
+        );
+        let txt_id = txt_layer.id;
+        scene.add_layer(txt_layer);
+
+        // Provide frames for both
+        let white_frame = RawFrame {
+            data: vec![255; 2 * 2 * 4],
+            format: PixelFormat::Argb8888,
+            width: 2,
+            height: 2,
+            pts_us: 0,
+        };
+        let mut frames = HashMap::new();
+        frames.insert(img_id, white_frame.clone());
+        frames.insert(txt_id, white_frame);
+
+        let result = comp.compose(&scene, &frames, 0);
+        assert!(result.is_valid());
+        // Should be all-white (two opaque white layers stacked)
+        assert!(result.data.iter().all(|&b| b == 255));
+    }
+
+    #[test]
+    fn blend_row_alpha_full_opacity() {
+        // opacity_fp = 256 gets clamped to 255 in blend_row_alpha
+        let src = [255u8, 100, 200, 50, 255, 100, 200, 50];
+        let mut dst = [0u8; 8];
+        blend_row_alpha(&mut dst, &src, 256);
+        // Source is fully opaque (alpha=255), so dst should match src
+        assert_eq!(&dst, &src);
+    }
+
     #[test]
     fn overlapping_semi_transparent() {
         let comp = Compositor::new(1, 1);

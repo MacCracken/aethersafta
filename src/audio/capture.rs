@@ -183,4 +183,154 @@ mod tests {
         // Compile-time check: AudioCaptureManager only available with pipewire feature.
         // This test just verifies the module compiles cleanly.
     }
+
+    #[cfg(feature = "pipewire")]
+    mod pipewire_tests {
+        use super::super::*;
+        use crate::audio::AudioSourceConfig;
+
+        #[test]
+        fn new_creates_empty_manager() {
+            let mgr = AudioCaptureManager::new();
+            assert_eq!(mgr.source_count(), 0);
+        }
+
+        #[test]
+        fn default_creates_empty_manager() {
+            let mgr = AudioCaptureManager::default();
+            assert_eq!(mgr.source_count(), 0);
+        }
+
+        #[test]
+        fn with_defaults_custom_params() {
+            let mgr = AudioCaptureManager::with_defaults(44100, 512);
+            assert_eq!(mgr.source_count(), 0);
+            assert_eq!(mgr.default_sample_rate, 44100);
+            assert_eq!(mgr.default_buffer_frames, 512);
+        }
+
+        #[test]
+        fn add_source_increments_count() {
+            let mut mgr = AudioCaptureManager::new();
+            let id = uuid::Uuid::new_v4();
+            // Use default device (None) — PipeWire will open a virtual capture
+            let result = mgr.add_source(id, AudioSourceConfig::new("Test Capture"));
+            // On CI without a real device, this may fail — that's OK
+            if result.is_ok() {
+                assert_eq!(mgr.source_count(), 1);
+                assert!(mgr.is_running(id));
+            }
+        }
+
+        #[test]
+        fn remove_nonexistent_returns_false() {
+            let mut mgr = AudioCaptureManager::new();
+            assert!(!mgr.remove_source(uuid::Uuid::new_v4()));
+        }
+
+        #[test]
+        fn add_and_remove_source() {
+            let mut mgr = AudioCaptureManager::new();
+            let id = uuid::Uuid::new_v4();
+            let result = mgr.add_source(id, AudioSourceConfig::new("Mic"));
+            if result.is_ok() {
+                assert_eq!(mgr.source_count(), 1);
+                assert!(mgr.remove_source(id));
+                assert_eq!(mgr.source_count(), 0);
+                assert!(!mgr.is_running(id));
+            }
+        }
+
+        #[test]
+        fn get_config_returns_source_config() {
+            let mut mgr = AudioCaptureManager::new();
+            let id = uuid::Uuid::new_v4();
+            let config = AudioSourceConfig::new("Desktop Audio");
+            let result = mgr.add_source(id, config);
+            if result.is_ok() {
+                let cfg = mgr.get_config(id);
+                assert!(cfg.is_some());
+                assert_eq!(cfg.unwrap().name, "Desktop Audio");
+            }
+        }
+
+        #[test]
+        fn get_config_nonexistent_returns_none() {
+            let mgr = AudioCaptureManager::new();
+            assert!(mgr.get_config(uuid::Uuid::new_v4()).is_none());
+        }
+
+        #[test]
+        fn is_running_nonexistent_returns_false() {
+            let mgr = AudioCaptureManager::new();
+            assert!(!mgr.is_running(uuid::Uuid::new_v4()));
+        }
+
+        #[test]
+        fn drain_buffers_empty_when_no_sources() {
+            let mgr = AudioCaptureManager::new();
+            let buffers = mgr.drain_buffers();
+            assert!(buffers.is_empty());
+        }
+
+        #[test]
+        fn drain_events_empty_when_no_sources() {
+            let mgr = AudioCaptureManager::new();
+            let events = mgr.drain_events();
+            assert!(events.is_empty());
+        }
+
+        #[test]
+        fn stop_all_stops_running_sources() {
+            let mut mgr = AudioCaptureManager::new();
+            let id = uuid::Uuid::new_v4();
+            let result = mgr.add_source(id, AudioSourceConfig::new("Stoppable"));
+            if result.is_ok() {
+                assert!(mgr.is_running(id));
+                mgr.stop_all();
+                assert!(!mgr.is_running(id));
+                // Double stop should be safe
+                mgr.stop_all();
+            }
+        }
+
+        #[test]
+        fn drain_buffers_with_active_source() {
+            let mut mgr = AudioCaptureManager::new();
+            let id = uuid::Uuid::new_v4();
+            let result = mgr.add_source(id, AudioSourceConfig::new("Buffer Drain"));
+            if result.is_ok() {
+                // Give PipeWire a moment to produce buffers
+                std::thread::sleep(std::time::Duration::from_millis(100));
+                let buffers = mgr.drain_buffers();
+                // May or may not have buffers depending on device, but shouldn't panic
+                let _ = buffers;
+            }
+        }
+
+        #[test]
+        fn multiple_sources() {
+            let mut mgr = AudioCaptureManager::new();
+            let id1 = uuid::Uuid::new_v4();
+            let id2 = uuid::Uuid::new_v4();
+
+            let r1 = mgr.add_source(id1, AudioSourceConfig::new("Src 1"));
+            let r2 = mgr.add_source(id2, AudioSourceConfig::new("Src 2"));
+
+            let expected_count = r1.is_ok() as usize + r2.is_ok() as usize;
+            assert_eq!(mgr.source_count(), expected_count);
+
+            // Cleanup
+            mgr.stop_all();
+        }
+
+        #[test]
+        fn drop_stops_all_captures() {
+            let mut mgr = AudioCaptureManager::new();
+            let id = uuid::Uuid::new_v4();
+            let _ = mgr.add_source(id, AudioSourceConfig::new("Drop Test"));
+            // Drop should call stop_all — just verify no panic
+            drop(mgr);
+        }
+    }
 }

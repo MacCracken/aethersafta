@@ -131,4 +131,83 @@ mod tests {
     fn open_nonexistent_fails() {
         assert!(ImageSource::open("/nonexistent/image.png").is_err());
     }
+
+    #[test]
+    fn open_valid_png() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("red.png");
+        let img = image::RgbaImage::from_pixel(4, 4, image::Rgba([255, 0, 0, 255]));
+        img.save(&path).unwrap();
+
+        let src = ImageSource::open(&path).expect("should load valid PNG");
+        assert_eq!(src.name(), "red.png");
+        assert_eq!(src.resolution(), (4, 4));
+        assert_eq!(src.path(), path.as_path());
+        assert!(!src.is_live());
+
+        let frame = src.capture_frame().unwrap().unwrap();
+        assert_eq!(frame.format, PixelFormat::Argb8888);
+        assert!(frame.is_valid());
+        assert_eq!(frame.width, 4);
+        assert_eq!(frame.height, 4);
+        // ARGB: 4*4 pixels * 4 bytes
+        assert_eq!(frame.data.len(), 4 * 4 * 4);
+    }
+
+    #[test]
+    fn open_valid_jpeg() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("blue.jpg");
+        // JPEG requires RGB (no alpha channel support)
+        let img = image::RgbImage::from_pixel(8, 8, image::Rgb([0, 0, 255]));
+        img.save(&path).unwrap();
+
+        let src = ImageSource::open(&path).expect("should load valid JPEG");
+        assert_eq!(src.name(), "blue.jpg");
+        assert_eq!(src.resolution(), (8, 8));
+
+        let frame = src.capture_frame().unwrap().unwrap();
+        assert_eq!(frame.format, PixelFormat::Argb8888);
+        assert!(frame.is_valid());
+    }
+
+    #[test]
+    fn open_corrupt_file_fails() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("corrupt.png");
+        std::fs::write(&path, b"not a valid image").unwrap();
+
+        assert!(ImageSource::open(&path).is_err());
+    }
+
+    #[test]
+    fn open_png_argb_pixel_order() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("pixel.png");
+        // Single red pixel: RGBA = [255, 0, 0, 255]
+        let img = image::RgbaImage::from_pixel(1, 1, image::Rgba([255, 0, 0, 255]));
+        img.save(&path).unwrap();
+
+        let src = ImageSource::open(&path).unwrap();
+        let frame = src.capture_frame().unwrap().unwrap();
+        // After RGBA→ARGB conversion: [A, R, G, B] = [255, 255, 0, 0]
+        assert_eq!(frame.data.len(), 4);
+        assert_eq!(frame.data[0], 255); // A
+        assert_eq!(frame.data[1], 255); // R
+        assert_eq!(frame.data[2], 0); // G
+        assert_eq!(frame.data[3], 0); // B
+    }
+
+    #[test]
+    fn path_accessor_from_raw() {
+        let src = ImageSource::from_raw("test", 1, 1, vec![0u8; 4]);
+        assert_eq!(src.path(), Path::new(""));
+    }
+
+    #[test]
+    fn id_is_unique() {
+        let a = ImageSource::from_raw("a", 1, 1, vec![0u8; 4]);
+        let b = ImageSource::from_raw("b", 1, 1, vec![0u8; 4]);
+        assert_ne!(a.id(), b.id());
+    }
 }
