@@ -193,6 +193,175 @@ fn bench_mix_with_dsp(c: &mut Criterion) {
         });
     }
 
+    // Noise gate only
+    {
+        let mut mixer = AudioMixer::new(AudioMixerConfig {
+            master_limiter: false,
+            ..Default::default()
+        });
+        let id = mixer.add_source(AudioSourceConfig::new("Gate"));
+        mixer.set_source_noise_gate(id, 0.01);
+
+        group.bench_function("noise_gate", |b| {
+            b.iter(|| {
+                let mut buffers = HashMap::new();
+                buffers.insert(id, test_buffer(0.5, 1024));
+                mixer.mix(&mut buffers)
+            })
+        });
+    }
+
+    // De-esser only
+    {
+        let mut mixer = AudioMixer::new(AudioMixerConfig {
+            master_limiter: false,
+            ..Default::default()
+        });
+        let id = mixer.add_source(AudioSourceConfig::new("DeEss"));
+        mixer.set_source_deesser(
+            id,
+            dhvani::dsp::DeEsserParams {
+                freq_hz: 6000.0,
+                threshold_db: -20.0,
+                reduction_db: 6.0,
+                q: 1.0,
+            },
+        );
+
+        group.bench_function("deesser", |b| {
+            b.iter(|| {
+                let mut buffers = HashMap::new();
+                buffers.insert(id, test_buffer(0.5, 1024));
+                mixer.mix(&mut buffers)
+            })
+        });
+    }
+
+    // Graphic EQ only
+    {
+        let mut mixer = AudioMixer::new(AudioMixerConfig {
+            master_limiter: false,
+            ..Default::default()
+        });
+        let id = mixer.add_source(AudioSourceConfig::new("GEQ"));
+        mixer.set_source_graphic_eq(
+            id,
+            dhvani::dsp::GraphicEqSettings {
+                enabled: true,
+                bands: [3.0, 1.0, 0.0, -1.0, 0.0, 2.0, 0.0, -2.0, 1.0, -3.0],
+            },
+        );
+
+        group.bench_function("graphic_eq_10band", |b| {
+            b.iter(|| {
+                let mut buffers = HashMap::new();
+                buffers.insert(id, test_buffer(0.5, 1024));
+                mixer.mix(&mut buffers)
+            })
+        });
+    }
+
+    // Reverb only
+    {
+        let mut mixer = AudioMixer::new(AudioMixerConfig {
+            master_limiter: false,
+            ..Default::default()
+        });
+        let id = mixer.add_source(AudioSourceConfig::new("Rev"));
+        mixer.set_source_reverb(
+            id,
+            dhvani::dsp::ReverbParams {
+                room_size: 0.8,
+                damping: 0.5,
+                mix: 0.3,
+            },
+        );
+
+        group.bench_function("reverb", |b| {
+            b.iter(|| {
+                let mut buffers = HashMap::new();
+                buffers.insert(id, test_buffer(0.5, 1024));
+                mixer.mix(&mut buffers)
+            })
+        });
+    }
+
+    // Delay only
+    {
+        let mut mixer = AudioMixer::new(AudioMixerConfig {
+            master_limiter: false,
+            ..Default::default()
+        });
+        let id = mixer.add_source(AudioSourceConfig::new("Dly"));
+        mixer.set_source_delay(id, 50.0, 0.3, 0.5);
+
+        group.bench_function("delay", |b| {
+            b.iter(|| {
+                let mut buffers = HashMap::new();
+                buffers.insert(id, test_buffer(0.5, 1024));
+                mixer.mix(&mut buffers)
+            })
+        });
+    }
+
+    // Full expanded chain: gate + EQ + comp + deesser + delay + reverb + limiter
+    {
+        let mut mixer = AudioMixer::new(AudioMixerConfig {
+            master_limiter: true,
+            ..Default::default()
+        });
+        let id = mixer.add_source(AudioSourceConfig::new("AllFx"));
+        mixer.set_source_noise_gate(id, 0.01);
+        mixer.set_source_eq(
+            id,
+            vec![dhvani::dsp::EqBandConfig {
+                band_type: dhvani::dsp::BandType::HighPass,
+                freq_hz: 80.0,
+                gain_db: 0.0,
+                q: 0.707,
+                enabled: true,
+            }],
+        );
+        mixer.set_source_compressor(
+            id,
+            dhvani::dsp::CompressorParams {
+                threshold_db: -20.0,
+                ratio: 4.0,
+                attack_ms: 5.0,
+                release_ms: 50.0,
+                makeup_gain_db: 0.0,
+                knee_db: 6.0,
+                mix: 1.0,
+            },
+        );
+        mixer.set_source_deesser(
+            id,
+            dhvani::dsp::DeEsserParams {
+                freq_hz: 6000.0,
+                threshold_db: -20.0,
+                reduction_db: 6.0,
+                q: 1.0,
+            },
+        );
+        mixer.set_source_delay(id, 10.0, 0.2, 0.3);
+        mixer.set_source_reverb(
+            id,
+            dhvani::dsp::ReverbParams {
+                room_size: 0.5,
+                damping: 0.5,
+                mix: 0.2,
+            },
+        );
+
+        group.bench_function("full_chain_all_effects", |b| {
+            b.iter(|| {
+                let mut buffers = HashMap::new();
+                buffers.insert(id, test_buffer(0.5, 1024));
+                mixer.mix(&mut buffers)
+            })
+        });
+    }
+
     group.finish();
 }
 
