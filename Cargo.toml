@@ -62,7 +62,7 @@ ai-hwaccel = { version = "0.23.3", optional = true, default-features = false }
 dhvani = { version = "0.22.4", default-features = false, features = ["dsp", "graph"] }
 
 # GPU-accelerated compositing (optional — soorat rendering engine)
-soorat = { path = "../soorat", optional = true }
+soorat = { version = "0.24", optional = true }
 wgpu = { version = "24", optional = true }
 pollster = { version = "0.4", optional = true }
 
