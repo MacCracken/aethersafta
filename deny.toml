@@ -60,7 +60,11 @@ wildcards = "allow"
 # ── advisories ────────────────────────────────────────────────────────
 
 [advisories]
-ignore = []
+ignore = [
+    # paste is unmaintained (RUSTSEC-2024-0436) but pulled transitively via
+    # metal → wgpu-hal → wgpu.  Nothing we can do until wgpu migrates to pastey.
+    "RUSTSEC-2024-0436",
+]
 
 # ── sources ───────────────────────────────────────────────────────────
 
