@@ -1,6 +1,6 @@
 [package]
 name = "aethersafta"
-version = "0.24.4"
+version = "0.25.3"
 edition = "2024"
 rust-version = "1.89"
 license = "AGPL-3.0-only"
@@ -62,7 +62,7 @@ ai-hwaccel = { version = "0.23.3", optional = true, default-features = false }
 dhvani = { version = "0.22.4", default-features = false, features = ["dsp", "graph"] }
 
 # GPU-accelerated compositing (optional — soorat rendering engine)
-soorat = { version = "0.24", optional = true }
+soorat = { version = "0.24.3", optional = true }
 wgpu = { version = "24", optional = true }
 pollster = { version = "0.4", optional = true }
 
