@@ -35,7 +35,7 @@ impl ImageSource {
                 .map_err(|e| anyhow::anyhow!("pixel buffer: {e}"))?;
         let argb_buf = ranga::convert::rgba8_to_argb8(&rgba_buf)
             .map_err(|e| anyhow::anyhow!("RGBA→ARGB: {e}"))?;
-        let argb = argb_buf.data;
+        let argb = argb_buf.into_data();
 
         let name = path
             .file_name()

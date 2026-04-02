@@ -99,20 +99,20 @@ fn bench_mix_with_dsp(c: &mut Criterion) {
         mixer.set_source_eq(
             id,
             vec![
-                dhvani::dsp::EqBandConfig {
-                    band_type: dhvani::dsp::BandType::HighPass,
-                    freq_hz: 80.0,
-                    gain_db: 0.0,
-                    q: 0.707,
-                    enabled: true,
-                },
-                dhvani::dsp::EqBandConfig {
-                    band_type: dhvani::dsp::BandType::Peaking,
-                    freq_hz: 3000.0,
-                    gain_db: 3.0,
-                    q: 1.0,
-                    enabled: true,
-                },
+                dhvani::dsp::EqBandConfig::new(
+                    dhvani::dsp::BandType::HighPass,
+                    80.0,
+                    0.0,
+                    0.707,
+                    true,
+                ),
+                dhvani::dsp::EqBandConfig::new(
+                    dhvani::dsp::BandType::Peaking,
+                    3000.0,
+                    3.0,
+                    1.0,
+                    true,
+                ),
             ],
         );
 
@@ -134,15 +134,14 @@ fn bench_mix_with_dsp(c: &mut Criterion) {
         let id = mixer.add_source(AudioSourceConfig::new("Comp"));
         mixer.set_source_compressor(
             id,
-            dhvani::dsp::CompressorParams {
-                threshold_db: -20.0,
-                ratio: 4.0,
-                attack_ms: 5.0,
-                release_ms: 50.0,
-                makeup_gain_db: 0.0,
-                knee_db: 6.0,
-                mix: 1.0,
-            },
+            dhvani::dsp::CompressorParams::new()
+                .with_threshold(-20.0)
+                .with_ratio(4.0)
+                .with_attack(5.0)
+                .with_release(50.0)
+                .with_makeup_gain(0.0)
+                .with_knee(6.0)
+                .with_mix(1.0),
         );
 
         group.bench_function("compressor", |b| {
@@ -163,25 +162,24 @@ fn bench_mix_with_dsp(c: &mut Criterion) {
         let id = mixer.add_source(AudioSourceConfig::new("Full"));
         mixer.set_source_eq(
             id,
-            vec![dhvani::dsp::EqBandConfig {
-                band_type: dhvani::dsp::BandType::HighPass,
-                freq_hz: 80.0,
-                gain_db: 0.0,
-                q: 0.707,
-                enabled: true,
-            }],
+            vec![dhvani::dsp::EqBandConfig::new(
+                dhvani::dsp::BandType::HighPass,
+                80.0,
+                0.0,
+                0.707,
+                true,
+            )],
         );
         mixer.set_source_compressor(
             id,
-            dhvani::dsp::CompressorParams {
-                threshold_db: -18.0,
-                ratio: 3.0,
-                attack_ms: 10.0,
-                release_ms: 100.0,
-                makeup_gain_db: 3.0,
-                knee_db: 6.0,
-                mix: 1.0,
-            },
+            dhvani::dsp::CompressorParams::new()
+                .with_threshold(-18.0)
+                .with_ratio(3.0)
+                .with_attack(10.0)
+                .with_release(100.0)
+                .with_makeup_gain(3.0)
+                .with_knee(6.0)
+                .with_mix(1.0),
         );
 
         group.bench_function("full_chain_eq_comp_limiter", |b| {
@@ -218,15 +216,11 @@ fn bench_mix_with_dsp(c: &mut Criterion) {
             ..Default::default()
         });
         let id = mixer.add_source(AudioSourceConfig::new("DeEss"));
-        mixer.set_source_deesser(
-            id,
-            dhvani::dsp::DeEsserParams {
-                freq_hz: 6000.0,
-                threshold_db: -20.0,
-                reduction_db: 6.0,
-                q: 1.0,
-            },
-        );
+        mixer.set_source_deesser(id, {
+            let mut p = dhvani::dsp::DeEsserParams::default();
+            p.q = 1.0;
+            p
+        });
 
         group.bench_function("deesser", |b| {
             b.iter(|| {
@@ -244,13 +238,12 @@ fn bench_mix_with_dsp(c: &mut Criterion) {
             ..Default::default()
         });
         let id = mixer.add_source(AudioSourceConfig::new("GEQ"));
-        mixer.set_source_graphic_eq(
-            id,
-            dhvani::dsp::GraphicEqSettings {
-                enabled: true,
-                bands: [3.0, 1.0, 0.0, -1.0, 0.0, 2.0, 0.0, -2.0, 1.0, -3.0],
-            },
-        );
+        mixer.set_source_graphic_eq(id, {
+            let mut s = dhvani::dsp::GraphicEqSettings::flat();
+            s.enabled = true;
+            s.bands = [3.0, 1.0, 0.0, -1.0, 0.0, 2.0, 0.0, -2.0, 1.0, -3.0];
+            s
+        });
 
         group.bench_function("graphic_eq_10band", |b| {
             b.iter(|| {
@@ -270,11 +263,10 @@ fn bench_mix_with_dsp(c: &mut Criterion) {
         let id = mixer.add_source(AudioSourceConfig::new("Rev"));
         mixer.set_source_reverb(
             id,
-            dhvani::dsp::ReverbParams {
-                room_size: 0.8,
-                damping: 0.5,
-                mix: 0.3,
-            },
+            dhvani::dsp::ReverbParams::new()
+                .with_room_size(0.8)
+                .with_damping(0.5)
+                .with_mix(0.3),
         );
 
         group.bench_function("reverb", |b| {
@@ -314,43 +306,37 @@ fn bench_mix_with_dsp(c: &mut Criterion) {
         mixer.set_source_noise_gate(id, 0.01);
         mixer.set_source_eq(
             id,
-            vec![dhvani::dsp::EqBandConfig {
-                band_type: dhvani::dsp::BandType::HighPass,
-                freq_hz: 80.0,
-                gain_db: 0.0,
-                q: 0.707,
-                enabled: true,
-            }],
+            vec![dhvani::dsp::EqBandConfig::new(
+                dhvani::dsp::BandType::HighPass,
+                80.0,
+                0.0,
+                0.707,
+                true,
+            )],
         );
         mixer.set_source_compressor(
             id,
-            dhvani::dsp::CompressorParams {
-                threshold_db: -20.0,
-                ratio: 4.0,
-                attack_ms: 5.0,
-                release_ms: 50.0,
-                makeup_gain_db: 0.0,
-                knee_db: 6.0,
-                mix: 1.0,
-            },
+            dhvani::dsp::CompressorParams::new()
+                .with_threshold(-20.0)
+                .with_ratio(4.0)
+                .with_attack(5.0)
+                .with_release(50.0)
+                .with_makeup_gain(0.0)
+                .with_knee(6.0)
+                .with_mix(1.0),
         );
-        mixer.set_source_deesser(
-            id,
-            dhvani::dsp::DeEsserParams {
-                freq_hz: 6000.0,
-                threshold_db: -20.0,
-                reduction_db: 6.0,
-                q: 1.0,
-            },
-        );
+        mixer.set_source_deesser(id, {
+            let mut p = dhvani::dsp::DeEsserParams::default();
+            p.q = 1.0;
+            p
+        });
         mixer.set_source_delay(id, 10.0, 0.2, 0.3);
         mixer.set_source_reverb(
             id,
-            dhvani::dsp::ReverbParams {
-                room_size: 0.5,
-                damping: 0.5,
-                mix: 0.2,
-            },
+            dhvani::dsp::ReverbParams::new()
+                .with_room_size(0.5)
+                .with_damping(0.5)
+                .with_mix(0.2),
         );
 
         group.bench_function("full_chain_all_effects", |b| {

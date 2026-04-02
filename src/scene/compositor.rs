@@ -229,10 +229,10 @@ impl Compositor {
             let Ok(back) = ranga::convert::rgba8_to_argb8(&resized) else {
                 return;
             };
-            scaled_data = back.data;
-            (&scaled_data[..], lw, lh)
+            scaled_data = back.into_data();
+            (scaled_data.as_slice(), lw, lh)
         } else {
-            (&frame.data[..], fw, fh)
+            (frame.data.as_ref(), fw, fh)
         };
 
         // 1:1 blend (original or pre-resized)

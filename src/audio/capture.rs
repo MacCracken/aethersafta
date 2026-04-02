@@ -60,12 +60,11 @@ impl AudioCaptureManager {
         id: AudioSourceId,
         config: AudioSourceConfig,
     ) -> anyhow::Result<()> {
-        let capture_config = CaptureConfig {
-            device_id: config.device_id,
-            sample_rate: self.default_sample_rate,
-            channels: 2,
-            buffer_frames: self.default_buffer_frames,
-        };
+        let mut capture_config = CaptureConfig::default();
+        capture_config.device_id = config.device_id;
+        capture_config.sample_rate = self.default_sample_rate;
+        capture_config.channels = 2;
+        capture_config.buffer_frames = self.default_buffer_frames;
 
         let mut capture = PwCapture::new(capture_config)?;
         capture.start()?;

@@ -146,7 +146,10 @@ impl GpuCompositor {
         self.texture_cache.retain(|id, _| active_ids.contains(id));
 
         // Phase 3: upload textures and render
-        let layout = self.pipeline.texture_bind_group_layout();
+        let layout = self
+            .pipeline
+            .texture_bind_group_layout()
+            .expect("missing texture bind group layout");
 
         for item in &work {
             let needs_update = match self.texture_cache.get(&item.layer_id) {

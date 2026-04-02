@@ -324,7 +324,7 @@ impl MasterNode {
     }
 
     pub fn lufs(&self) -> f32 {
-        self.meter.lufs
+        self.meter.lufs()
     }
 }
 
@@ -832,13 +832,13 @@ mod tests {
     fn dsp_chain_node_with_eq() {
         let mut node = DspChainNode::new(0.0, Arc::new(PeakMeter::new()));
         node.set_eq(dhvani::dsp::ParametricEq::new(
-            vec![dhvani::dsp::EqBandConfig {
-                band_type: dhvani::dsp::BandType::HighPass,
-                freq_hz: 80.0,
-                gain_db: 0.0,
-                q: 0.707,
-                enabled: true,
-            }],
+            vec![dhvani::dsp::EqBandConfig::new(
+                dhvani::dsp::BandType::HighPass,
+                80.0,
+                0.0,
+                0.707,
+                true,
+            )],
             48000,
             2,
         ));
@@ -853,15 +853,14 @@ mod tests {
         let mut node = DspChainNode::new(0.0, Arc::new(PeakMeter::new()));
         node.set_compressor(
             dhvani::dsp::Compressor::new(
-                dhvani::dsp::CompressorParams {
-                    threshold_db: -20.0,
-                    ratio: 4.0,
-                    attack_ms: 5.0,
-                    release_ms: 50.0,
-                    makeup_gain_db: 0.0,
-                    knee_db: 0.0,
-                    mix: 1.0,
-                },
+                dhvani::dsp::CompressorParams::new()
+                    .with_threshold(-20.0)
+                    .with_ratio(4.0)
+                    .with_attack(5.0)
+                    .with_release(50.0)
+                    .with_makeup_gain(0.0)
+                    .with_knee(0.0)
+                    .with_mix(1.0),
                 48000,
             )
             .unwrap(),

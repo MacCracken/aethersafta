@@ -311,7 +311,7 @@ impl AudioMixer {
     /// Integrated LUFS of the master bus.
     #[must_use]
     pub fn master_lufs(&self) -> f32 {
-        self.master_meter.lufs
+        self.master_meter.lufs()
     }
 
     /// Acquire a pre-allocated audio buffer from the pool.
@@ -319,7 +319,7 @@ impl AudioMixer {
     /// Use this to fill with captured audio data before passing to [`mix()`](Self::mix).
     /// Avoids heap allocation on the real-time path. Call [`release_buffer()`](Self::release_buffer)
     /// when done (or let the buffer drop — it just won't be reused).
-    #[must_use]
+    #[must_use = "buffer should be filled with audio data and passed to mix()"]
     pub fn acquire_buffer(&mut self) -> AudioBuffer {
         self.buffer_pool.acquire()
     }
@@ -587,13 +587,13 @@ mod tests {
 
         mixer.set_source_eq(
             id,
-            vec![dsp::EqBandConfig {
-                band_type: dsp::BandType::HighPass,
-                freq_hz: 80.0,
-                gain_db: 0.0,
-                q: 0.707,
-                enabled: true,
-            }],
+            vec![dsp::EqBandConfig::new(
+                dsp::BandType::HighPass,
+                80.0,
+                0.0,
+                0.707,
+                true,
+            )],
         );
 
         let mut buffers = HashMap::new();
@@ -613,15 +613,14 @@ mod tests {
 
         mixer.set_source_compressor(
             id,
-            dsp::CompressorParams {
-                threshold_db: -20.0,
-                ratio: 4.0,
-                attack_ms: 5.0,
-                release_ms: 50.0,
-                makeup_gain_db: 0.0,
-                knee_db: 0.0,
-                mix: 1.0,
-            },
+            dsp::CompressorParams::new()
+                .with_threshold(-20.0)
+                .with_ratio(4.0)
+                .with_attack(5.0)
+                .with_release(50.0)
+                .with_makeup_gain(0.0)
+                .with_knee(0.0)
+                .with_mix(1.0),
         );
 
         let mut buffers = HashMap::new();
@@ -789,28 +788,27 @@ mod tests {
     #[test]
     fn set_compressor_nonexistent() {
         let mut mixer = AudioMixer::new(AudioMixerConfig::default());
-        let params = dsp::CompressorParams {
-            threshold_db: -20.0,
-            ratio: 4.0,
-            attack_ms: 5.0,
-            release_ms: 50.0,
-            makeup_gain_db: 0.0,
-            knee_db: 0.0,
-            mix: 1.0,
-        };
+        let params = dsp::CompressorParams::new()
+            .with_threshold(-20.0)
+            .with_ratio(4.0)
+            .with_attack(5.0)
+            .with_release(50.0)
+            .with_makeup_gain(0.0)
+            .with_knee(0.0)
+            .with_mix(1.0);
         assert!(!mixer.set_source_compressor(Uuid::new_v4(), params));
     }
 
     #[test]
     fn set_eq_nonexistent() {
         let mut mixer = AudioMixer::new(AudioMixerConfig::default());
-        let bands = vec![dsp::EqBandConfig {
-            band_type: dsp::BandType::HighPass,
-            freq_hz: 80.0,
-            gain_db: 0.0,
-            q: 0.707,
-            enabled: true,
-        }];
+        let bands = vec![dsp::EqBandConfig::new(
+            dsp::BandType::HighPass,
+            80.0,
+            0.0,
+            0.707,
+            true,
+        )];
         assert!(!mixer.set_source_eq(Uuid::new_v4(), bands));
     }
 
@@ -879,15 +877,14 @@ mod tests {
             ..Default::default()
         });
         let id = mixer.add_source(AudioSourceConfig::new("DeEssed"));
-        assert!(mixer.set_source_deesser(
-            id,
-            dsp::DeEsserParams {
-                freq_hz: 6000.0,
-                threshold_db: -20.0,
-                reduction_db: 6.0,
-                q: 1.0,
-            },
-        ));
+        assert!(mixer.set_source_deesser(id, {
+            let mut p = dsp::DeEsserParams::default();
+            p.freq_hz = 6000.0;
+            p.threshold_db = -20.0;
+            p.reduction_db = 6.0;
+            p.q = 1.0;
+            p
+        },));
 
         let mut buffers = HashMap::new();
         buffers.insert(id, test_buffer(0.5, 1024));
@@ -902,10 +899,9 @@ mod tests {
             ..Default::default()
         });
         let id = mixer.add_source(AudioSourceConfig::new("GEQ"));
-        let settings = dsp::GraphicEqSettings {
-            enabled: true,
-            bands: [3.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, -3.0],
-        };
+        let mut settings = dsp::GraphicEqSettings::flat();
+        settings.enabled = true;
+        settings.bands = [3.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, -3.0];
         assert!(mixer.set_source_graphic_eq(id, settings));
 
         let mut buffers = HashMap::new();
@@ -921,14 +917,15 @@ mod tests {
             ..Default::default()
         });
         let id = mixer.add_source(AudioSourceConfig::new("Reverbed"));
-        assert!(mixer.set_source_reverb(
-            id,
-            dsp::ReverbParams {
-                room_size: 0.8,
-                damping: 0.5,
-                mix: 0.3,
-            },
-        ));
+        assert!(
+            mixer.set_source_reverb(
+                id,
+                dsp::ReverbParams::new()
+                    .with_room_size(0.8)
+                    .with_damping(0.5)
+                    .with_mix(0.3),
+            )
+        );
 
         let mut buffers = HashMap::new();
         buffers.insert(id, test_buffer(0.5, 1024));
@@ -975,43 +972,40 @@ mod tests {
         mixer.set_source_noise_gate(id, 0.01);
         mixer.set_source_eq(
             id,
-            vec![dsp::EqBandConfig {
-                band_type: dsp::BandType::HighPass,
-                freq_hz: 80.0,
-                gain_db: 0.0,
-                q: 0.707,
-                enabled: true,
-            }],
+            vec![dsp::EqBandConfig::new(
+                dsp::BandType::HighPass,
+                80.0,
+                0.0,
+                0.707,
+                true,
+            )],
         );
         mixer.set_source_compressor(
             id,
-            dsp::CompressorParams {
-                threshold_db: -20.0,
-                ratio: 4.0,
-                attack_ms: 5.0,
-                release_ms: 50.0,
-                makeup_gain_db: 0.0,
-                knee_db: 6.0,
-                mix: 1.0,
-            },
+            dsp::CompressorParams::new()
+                .with_threshold(-20.0)
+                .with_ratio(4.0)
+                .with_attack(5.0)
+                .with_release(50.0)
+                .with_makeup_gain(0.0)
+                .with_knee(6.0)
+                .with_mix(1.0),
         );
-        mixer.set_source_deesser(
-            id,
-            dsp::DeEsserParams {
-                freq_hz: 6000.0,
-                threshold_db: -20.0,
-                reduction_db: 6.0,
-                q: 1.0,
-            },
-        );
+        mixer.set_source_deesser(id, {
+            let mut p = dsp::DeEsserParams::default();
+            p.freq_hz = 6000.0;
+            p.threshold_db = -20.0;
+            p.reduction_db = 6.0;
+            p.q = 1.0;
+            p
+        });
         mixer.set_source_delay(id, 10.0, 0.2, 0.3);
         mixer.set_source_reverb(
             id,
-            dsp::ReverbParams {
-                room_size: 0.5,
-                damping: 0.5,
-                mix: 0.2,
-            },
+            dsp::ReverbParams::new()
+                .with_room_size(0.5)
+                .with_damping(0.5)
+                .with_mix(0.2),
         );
 
         // Run multiple mix cycles to exercise stateful effects
@@ -1062,21 +1056,20 @@ mod tests {
         // Set both parametric and graphic EQ
         mixer.set_source_eq(
             id,
-            vec![dsp::EqBandConfig {
-                band_type: dsp::BandType::HighPass,
-                freq_hz: 80.0,
-                gain_db: 0.0,
-                q: 0.707,
-                enabled: true,
-            }],
+            vec![dsp::EqBandConfig::new(
+                dsp::BandType::HighPass,
+                80.0,
+                0.0,
+                0.707,
+                true,
+            )],
         );
-        mixer.set_source_graphic_eq(
-            id,
-            dsp::GraphicEqSettings {
-                enabled: true,
-                bands: [6.0; 10],
-            },
-        );
+        mixer.set_source_graphic_eq(id, {
+            let mut s = dsp::GraphicEqSettings::flat();
+            s.enabled = true;
+            s.bands = [6.0; 10];
+            s
+        });
 
         // Both set — should still process without error (parametric wins)
         let mut buffers = HashMap::new();
@@ -1101,11 +1094,10 @@ mod tests {
         // Add reverb, mix, clear, mix, re-add, mix
         mixer.set_source_reverb(
             id,
-            dsp::ReverbParams {
-                room_size: 0.8,
-                damping: 0.5,
-                mix: 0.5,
-            },
+            dsp::ReverbParams::new()
+                .with_room_size(0.8)
+                .with_damping(0.5)
+                .with_mix(0.5),
         );
         let mut buffers = HashMap::new();
         buffers.insert(id, test_buffer(0.5, 1024));
@@ -1119,11 +1111,10 @@ mod tests {
         // Re-add with different params — should be fresh state
         mixer.set_source_reverb(
             id,
-            dsp::ReverbParams {
-                room_size: 0.3,
-                damping: 0.8,
-                mix: 0.2,
-            },
+            dsp::ReverbParams::new()
+                .with_room_size(0.3)
+                .with_damping(0.8)
+                .with_mix(0.2),
         );
         let mut buffers = HashMap::new();
         buffers.insert(id, test_buffer(0.5, 1024));
@@ -1142,15 +1133,14 @@ mod tests {
         let id = mixer.add_source(AudioSourceConfig::new("Comp Check"));
         mixer.set_source_compressor(
             id,
-            dsp::CompressorParams {
-                threshold_db: -20.0,
-                ratio: 8.0,
-                attack_ms: 0.1,
-                release_ms: 10.0,
-                makeup_gain_db: 0.0,
-                knee_db: 0.0,
-                mix: 1.0,
-            },
+            dsp::CompressorParams::new()
+                .with_threshold(-20.0)
+                .with_ratio(8.0)
+                .with_attack(0.1)
+                .with_release(10.0)
+                .with_makeup_gain(0.0)
+                .with_knee(0.0)
+                .with_mix(1.0),
         );
 
         // Run several cycles so compressor converges
@@ -1215,50 +1205,45 @@ mod tests {
         mixer.set_source_noise_gate(id, 0.01);
         mixer.set_source_eq(
             id,
-            vec![dsp::EqBandConfig {
-                band_type: dsp::BandType::HighPass,
-                freq_hz: 80.0,
-                gain_db: 0.0,
-                q: 0.707,
-                enabled: true,
-            }],
+            vec![dsp::EqBandConfig::new(
+                dsp::BandType::HighPass,
+                80.0,
+                0.0,
+                0.707,
+                true,
+            )],
         );
-        mixer.set_source_graphic_eq(
-            id,
-            dsp::GraphicEqSettings {
-                enabled: true,
-                bands: [0.0; 10],
-            },
-        );
+        mixer.set_source_graphic_eq(id, {
+            let mut s = dsp::GraphicEqSettings::flat();
+            s.enabled = true;
+            s
+        });
         mixer.set_source_compressor(
             id,
-            dsp::CompressorParams {
-                threshold_db: -20.0,
-                ratio: 4.0,
-                attack_ms: 5.0,
-                release_ms: 50.0,
-                makeup_gain_db: 0.0,
-                knee_db: 0.0,
-                mix: 1.0,
-            },
+            dsp::CompressorParams::new()
+                .with_threshold(-20.0)
+                .with_ratio(4.0)
+                .with_attack(5.0)
+                .with_release(50.0)
+                .with_makeup_gain(0.0)
+                .with_knee(0.0)
+                .with_mix(1.0),
         );
-        mixer.set_source_deesser(
-            id,
-            dsp::DeEsserParams {
-                freq_hz: 6000.0,
-                threshold_db: -20.0,
-                reduction_db: 6.0,
-                q: 1.0,
-            },
-        );
+        mixer.set_source_deesser(id, {
+            let mut p = dsp::DeEsserParams::default();
+            p.freq_hz = 6000.0;
+            p.threshold_db = -20.0;
+            p.reduction_db = 6.0;
+            p.q = 1.0;
+            p
+        });
         mixer.set_source_delay(id, 10.0, 0.2, 0.3);
         mixer.set_source_reverb(
             id,
-            dsp::ReverbParams {
-                room_size: 0.5,
-                damping: 0.5,
-                mix: 0.2,
-            },
+            dsp::ReverbParams::new()
+                .with_room_size(0.5)
+                .with_damping(0.5)
+                .with_mix(0.2),
         );
 
         // Clear all individually

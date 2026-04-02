@@ -293,13 +293,13 @@ pub fn detect_best_encoder(codec: VideoCodec) -> EncoderBackend {
 #[inline]
 fn make_video_frame(frame: &RawFrame) -> tarang::core::VideoFrame {
     let yuv = argb_to_yuv420p(&frame.data, frame.width, frame.height);
-    tarang::core::VideoFrame {
-        data: bytes::Bytes::from(yuv),
-        pixel_format: tarang::core::PixelFormat::Yuv420p,
-        width: frame.width,
-        height: frame.height,
-        timestamp: std::time::Duration::from_micros(frame.pts_us),
-    }
+    tarang::core::VideoFrame::new(
+        bytes::Bytes::from(yuv),
+        tarang::core::PixelFormat::Yuv420p,
+        frame.width,
+        frame.height,
+        std::time::Duration::from_micros(frame.pts_us),
+    )
 }
 
 #[cfg(any(feature = "vaapi", feature = "openh264-enc"))]
