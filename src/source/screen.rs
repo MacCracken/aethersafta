@@ -11,7 +11,7 @@ use std::sync::Mutex;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use anyhow::Context;
-use tracing::{debug, info, warn};
+use tracing::{debug, info};
 use wayland_client::globals::{self, GlobalListContents};
 use wayland_client::protocol::{wl_buffer, wl_output, wl_registry, wl_shm, wl_shm_pool};
 use wayland_client::{Connection, Dispatch, EventQueue, QueueHandle, delegate_noop};
@@ -22,6 +22,7 @@ use wayland_protocols_wlr::screencopy::v1::client::{
 use super::{PixelFormat, RawFrame, Source, SourceId};
 
 /// Information about an available screen/output.
+#[non_exhaustive]
 #[derive(Debug, Clone)]
 pub struct ScreenInfo {
     /// Output index (order of wl_output globals).
@@ -176,6 +177,36 @@ struct ScreenInner {
     shm: wl_shm::WlShm,
     manager: zwlr_screencopy_manager_v1::ZwlrScreencopyManagerV1,
     output: wl_output::WlOutput,
+    /// Persistent shm buffer — reused across frames to avoid per-frame memfd_create.
+    persistent_shm: Option<PersistentShm>,
+}
+
+/// Reusable shared memory buffer for screen capture.
+struct PersistentShm {
+    #[allow(dead_code)] // Kept alive — backing fd for the mmap region
+    memfd: std::fs::File,
+    pool: wl_shm_pool::WlShmPool,
+    buffer: wl_buffer::WlBuffer,
+    mmap_ptr: *mut libc::c_void,
+    buf_size: usize,
+    format: wl_shm::Format,
+    width: u32,
+    height: u32,
+    stride: u32,
+}
+
+// SAFETY: PersistentShm fields are only accessed under ScreenInner's Mutex.
+unsafe impl Send for PersistentShm {}
+
+impl Drop for PersistentShm {
+    fn drop(&mut self) {
+        // SAFETY: mmap_ptr was returned by a successful mmap call with this buf_size.
+        unsafe {
+            libc::munmap(self.mmap_ptr, self.buf_size);
+        }
+        self.buffer.destroy();
+        self.pool.destroy();
+    }
 }
 
 /// Internal state for capture dispatch.
@@ -302,6 +333,7 @@ impl ScreenSource {
                 shm,
                 manager,
                 output,
+                persistent_shm: None,
             }),
             frame_count: AtomicU64::new(0),
         })
@@ -324,8 +356,6 @@ impl Source for ScreenSource {
             .map_err(|_| anyhow::anyhow!("screen capture lock poisoned"))?;
 
         let qh = inner.queue.handle();
-
-        // Reset state for this capture
         let mut state = CaptureState::new();
 
         // Request a new frame
@@ -349,30 +379,83 @@ impl Source for ScreenSource {
         };
 
         let buf_size = (state.shm_stride as usize) * (state.shm_height as usize);
-        // Sanity: reject buffers > 256MB (8K@32bpp with stride padding)
         if buf_size == 0 || buf_size > 256 * 1024 * 1024 {
             frame.destroy();
             inner.queue.roundtrip(&mut state).ok();
             return Ok(None);
         }
 
-        // Create shm buffer
-        let memfd = create_memfd(buf_size)?;
-        let pool = inner
-            .shm
-            .create_pool(memfd.as_fd(), buf_size as i32, &qh, ());
-        let buffer = pool.create_buffer(
-            0,
-            state.shm_width as i32,
-            state.shm_height as i32,
-            state.shm_stride as i32,
-            shm_format,
-            &qh,
-            (),
-        );
+        // Reuse or create shm buffer. Only recreate if dimensions/format changed.
+        let needs_new_buffer = inner.persistent_shm.as_ref().is_none_or(|p| {
+            p.buf_size != buf_size
+                || p.format != shm_format
+                || p.width != state.shm_width
+                || p.height != state.shm_height
+        });
 
-        // Send copy request
-        frame.copy(&buffer);
+        if needs_new_buffer {
+            // Drop cleans up mmap + protocol objects via PersistentShm::drop
+            drop(inner.persistent_shm.take());
+            inner.queue.roundtrip(&mut state).ok();
+
+            let memfd = create_memfd(buf_size)?;
+            let pool = inner
+                .shm
+                .create_pool(memfd.as_fd(), buf_size as i32, &qh, ());
+            let buffer = pool.create_buffer(
+                0,
+                state.shm_width as i32,
+                state.shm_height as i32,
+                state.shm_stride as i32,
+                shm_format,
+                &qh,
+                (),
+            );
+
+            let mmap_ptr = unsafe {
+                libc::mmap(
+                    std::ptr::null_mut(),
+                    buf_size,
+                    libc::PROT_READ,
+                    libc::MAP_SHARED,
+                    std::os::fd::AsRawFd::as_raw_fd(&memfd),
+                    0,
+                )
+            };
+            if mmap_ptr == libc::MAP_FAILED {
+                buffer.destroy();
+                pool.destroy();
+                frame.destroy();
+                inner.queue.roundtrip(&mut state).ok();
+                anyhow::bail!("mmap failed for screen capture buffer");
+            }
+
+            inner.persistent_shm = Some(PersistentShm {
+                memfd,
+                pool,
+                buffer,
+                mmap_ptr,
+                buf_size,
+                format: shm_format,
+                width: state.shm_width,
+                height: state.shm_height,
+                stride: state.shm_stride,
+            });
+        }
+
+        // Extract shm params before roundtrip (avoids borrow conflict with inner.queue)
+        let (shm_mmap_ptr, shm_buf_size, shm_w, shm_h, shm_s) = {
+            let shm = inner.persistent_shm.as_ref().unwrap();
+            frame.copy(&shm.buffer);
+            (
+                shm.mmap_ptr,
+                shm.buf_size,
+                shm.width,
+                shm.height,
+                shm.stride,
+            )
+        };
+
         inner.queue.flush().ok();
 
         // Wait for ready
@@ -383,44 +466,24 @@ impl Source for ScreenSource {
             }
         }
 
-        // Read the pixel data
+        // Read pixel data from persistent mmap
         let argb = if state.ready {
-            let mmap = unsafe {
-                libc::mmap(
-                    std::ptr::null_mut(),
-                    buf_size,
-                    libc::PROT_READ,
-                    libc::MAP_SHARED,
-                    std::os::fd::AsRawFd::as_raw_fd(&memfd),
-                    0,
-                )
-            };
-
-            if mmap == libc::MAP_FAILED {
-                warn!("mmap failed for screen capture buffer");
-                None
-            } else {
-                let slice = unsafe { std::slice::from_raw_parts(mmap as *const u8, buf_size) };
-                let data = xrgb_to_argb(slice, state.shm_width, state.shm_height, state.shm_stride);
-                unsafe {
-                    libc::munmap(mmap, buf_size);
-                }
-                Some(data)
-            }
+            // SAFETY: mmap_ptr is valid and shm_buf_size matches the mapped region.
+            // The compositor has finished writing (ready event received).
+            let slice =
+                unsafe { std::slice::from_raw_parts(shm_mmap_ptr as *const u8, shm_buf_size) };
+            Some(xrgb_to_argb(slice, shm_w, shm_h, shm_s))
         } else {
             None
         };
 
-        // Cleanup protocol objects
-        buffer.destroy();
-        pool.destroy();
         frame.destroy();
         inner.queue.roundtrip(&mut state).ok();
 
         match argb {
             Some(data) => {
                 let frame_num = self.frame_count.fetch_add(1, Ordering::Relaxed);
-                let pts_us = frame_num * 33_333; // ~30fps default
+                let pts_us = frame_num * 33_333;
 
                 debug!(
                     pts_us,

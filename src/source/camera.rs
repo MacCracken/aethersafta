@@ -19,6 +19,7 @@ use v4l::video::Capture;
 use super::{PixelFormat, RawFrame, Source, SourceId};
 
 /// Information about an available camera device.
+#[non_exhaustive]
 #[derive(Debug, Clone)]
 pub struct CameraInfo {
     /// Device index (e.g. 0 for /dev/video0).

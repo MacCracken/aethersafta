@@ -57,7 +57,7 @@ pub use scene::compositor::Compositor;
 pub use scene::gpu_compositor::GpuCompositor;
 pub use scene::{Layer, LayerId, SceneGraph};
 pub use source::image::ImageSource;
-pub use source::manager::VideoCaptureManager;
+pub use source::manager::{VideoCaptureManager, collect_layer_frames};
 pub use source::synthetic::SyntheticSource;
 pub use source::{PixelFormat, RawFrame, Source, SourceId};
 pub use timing::{FrameClock, LatencyBudget};

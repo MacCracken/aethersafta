@@ -739,3 +739,74 @@ fn memory_rss_stability() {
         );
     }
 }
+
+/// Multi-source end-to-end: compose with two synthetic sources at different FPS.
+#[test]
+fn multi_source_compose_e2e() {
+    use crate::scene::{LayerContent, compositor::Compositor};
+    use crate::source::SourceConfig;
+    use crate::source::manager::{VideoCaptureManager, collect_layer_frames};
+    use crate::source::synthetic::{Pattern, SyntheticSource};
+
+    let mut scene = SceneGraph::new(128, 128, 30);
+    let mut mgr = VideoCaptureManager::new();
+
+    // Background: 30fps solid color
+    let bg = SyntheticSource::new("bg", 128, 128, 30, Pattern::Solid([255, 0, 0, 255]));
+    let bg_id = bg.id();
+    let mut bg_layer = Layer::new("bg", LayerContent::Source { source_id: bg_id });
+    bg_layer.z_index = 0;
+    scene.add_layer(bg_layer);
+    mgr.add_source(Box::new(bg), SourceConfig::Screen { monitor: None }, 30);
+
+    // Overlay: 15fps gradient
+    let ovl = SyntheticSource::new("ovl", 64, 64, 15, Pattern::Gradient);
+    let ovl_id = ovl.id();
+    let mut ovl_layer = Layer::new("ovl", LayerContent::Source { source_id: ovl_id });
+    ovl_layer.z_index = 1;
+    ovl_layer.position = (32, 32);
+    ovl_layer.size = Some((64, 64));
+    ovl_layer.opacity = 0.5;
+    scene.add_layer(ovl_layer);
+    mgr.add_source(
+        Box::new(ovl),
+        SourceConfig::Image {
+            path: "test".into(),
+        },
+        15,
+    );
+
+    let mut compositor = Compositor::new(128, 128);
+
+    // Run 60 frames (2s at 30fps)
+    for i in 0..60 {
+        let pts = i as u64 * 33_333;
+        let source_frames = mgr.capture_all(pts);
+        assert_eq!(source_frames.len(), 2, "both sources should produce frames");
+
+        let layer_frames = collect_layer_frames(&scene, &source_frames);
+        assert_eq!(layer_frames.len(), 2, "both layers should have frames");
+
+        let composited = compositor.compose(&scene, &layer_frames, pts);
+        assert!(composited.is_valid());
+        assert_eq!(composited.width, 128);
+        assert_eq!(composited.height, 128);
+        compositor.reclaim_buffer(composited.data);
+    }
+}
+
+/// Media source: missing file returns error, not panic.
+#[test]
+#[cfg(feature = "openh264-dec")]
+fn media_source_open_nonexistent() {
+    let result = crate::source::media::MediaFileSource::open("/nonexistent/video.mp4");
+    assert!(result.is_err());
+}
+
+/// Camera source: missing device returns error, not panic.
+#[test]
+#[cfg(feature = "camera")]
+fn camera_source_open_nonexistent() {
+    let result = crate::source::camera::CameraSource::open("/dev/video999");
+    assert!(result.is_err());
+}

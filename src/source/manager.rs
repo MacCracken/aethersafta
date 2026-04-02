@@ -57,6 +57,7 @@ struct ManagedSource {
 /// let frames = mgr.capture_all(0);
 /// assert!(frames.contains_key(&id));
 /// ```
+#[non_exhaustive]
 pub struct VideoCaptureManager {
     sources: HashMap<SourceId, ManagedSource>,
     events: Vec<(SourceId, SourceEvent)>,
