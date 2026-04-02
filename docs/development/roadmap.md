@@ -232,6 +232,7 @@ All of the following must be true before cutting 1.0:
 - [ ] MCP tools for agnoshi (`aethersafta_record`, `aethersafta_stream`, `aethersafta_scene`)
 - [ ] Daimon API handlers for remote scene control
 - [ ] Plugin system for custom sources and effects
+- [ ] Plugin sandboxing via kavach (isolate untrusted effect plugins with WASM/process sandbox)
 
 ---
 
