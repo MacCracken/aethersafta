@@ -674,3 +674,68 @@ fn mixer_config_custom() {
     assert!((cfg.master_gain_db - (-3.0)).abs() < f32::EPSILON);
     assert!(!cfg.master_limiter);
 }
+
+/// Measure RSS growth over sustained compositing to detect memory leaks.
+///
+/// Runs 600 frames (20s at 30fps) with buffer reclaim and checks that
+/// RSS does not grow more than 10MB between the warmup and final phase.
+#[test]
+#[cfg(target_os = "linux")]
+fn memory_rss_stability() {
+    use crate::scene::{LayerContent, compositor::Compositor};
+    use crate::source::synthetic::{Pattern, SyntheticSource};
+
+    fn rss_kb() -> Option<usize> {
+        let status = std::fs::read_to_string("/proc/self/status").ok()?;
+        status
+            .lines()
+            .find(|l| l.starts_with("VmRSS:"))
+            .and_then(|l| l.split_whitespace().nth(1))
+            .and_then(|v| v.parse().ok())
+    }
+
+    let src = SyntheticSource::new("rss", 1920, 1080, 30, Pattern::Gradient);
+    let mut scene = SceneGraph::new(1920, 1080, 30);
+    let layer = Layer::new(
+        "src",
+        LayerContent::Source {
+            source_id: src.id(),
+        },
+    );
+    let lid = layer.id;
+    scene.add_layer(layer);
+
+    let mut compositor = Compositor::new(1920, 1080);
+
+    // Warmup: 100 frames to stabilize allocations
+    for i in 0..100 {
+        let frame = src.capture_frame().unwrap().unwrap();
+        let mut frames = HashMap::new();
+        frames.insert(lid, frame);
+        let composited = compositor.compose(&scene, &frames, i * 33333);
+        compositor.reclaim_buffer(composited.data);
+    }
+
+    let rss_after_warmup = rss_kb();
+
+    // Sustained: 500 more frames
+    for i in 100..600 {
+        let frame = src.capture_frame().unwrap().unwrap();
+        let mut frames = HashMap::new();
+        frames.insert(lid, frame);
+        let composited = compositor.compose(&scene, &frames, i * 33333);
+        compositor.reclaim_buffer(composited.data);
+    }
+
+    let rss_after_sustained = rss_kb();
+
+    if let (Some(before), Some(after)) = (rss_after_warmup, rss_after_sustained) {
+        let growth_kb = after.saturating_sub(before);
+        let growth_mb = growth_kb / 1024;
+        assert!(
+            growth_mb < 10,
+            "RSS grew {growth_mb}MB over 500 frames — possible memory leak \
+             (before={before}KB, after={after}KB)"
+        );
+    }
+}

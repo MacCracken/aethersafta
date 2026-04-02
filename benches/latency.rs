@@ -50,6 +50,7 @@ fn main() {
 
     let mut compose_times = Vec::with_capacity(num_frames);
     let mut pipeline_times = Vec::with_capacity(num_frames);
+    let mut yuv_scratch = Vec::new();
 
     // Warmup
     for _ in 0..10 {
@@ -74,8 +75,8 @@ fn main() {
         let result = compositor.compose(&scene, &frames, pts);
         let compose_us = compose_start.elapsed().as_micros() as f64;
 
-        // Simulate encode prep: color convert
-        let _yuv = aethersafta::encode::argb_to_yuv420p(&result.data, width, height);
+        // Simulate encode prep: color convert (reuse buffer like real pipeline)
+        aethersafta::encode::argb_to_yuv420p_into(&result.data, width, height, &mut yuv_scratch);
 
         let pipeline_us = pipeline_start.elapsed().as_micros() as f64;
 

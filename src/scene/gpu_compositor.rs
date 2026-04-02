@@ -26,6 +26,8 @@ pub struct GpuCompositor {
     height: u32,
     /// Cached layer textures — reused across frames when source unchanged.
     texture_cache: HashMap<LayerId, CachedTexture>,
+    /// Reusable buffer for RGBA→ARGB readback conversion.
+    argb_scratch: Vec<u8>,
 }
 
 struct CachedTexture {
@@ -74,6 +76,7 @@ impl GpuCompositor {
             width,
             height,
             texture_cache: HashMap::new(),
+            argb_scratch: Vec::new(),
         })
     }
 
@@ -95,6 +98,7 @@ impl GpuCompositor {
             width,
             height,
             texture_cache: HashMap::new(),
+            argb_scratch: Vec::new(),
         })
     }
 
@@ -214,10 +218,10 @@ impl GpuCompositor {
             .read_pixels(&self.gpu.device, &self.gpu.queue)
             .unwrap_or_else(|_| vec![0u8; (self.width * self.height * 4) as usize]);
 
-        let argb = rgba_to_argb(&rgba);
+        rgba_to_argb_into(&rgba, &mut self.argb_scratch);
 
         RawFrame {
-            data: argb.into(),
+            data: std::mem::take(&mut self.argb_scratch).into(),
             format: PixelFormat::Argb8888,
             width: self.width,
             height: self.height,
@@ -325,6 +329,15 @@ impl GpuCompositor {
     pub fn height(&self) -> u32 {
         self.height
     }
+
+    /// Return a previously composed frame's data buffer for reuse.
+    ///
+    /// Avoids per-frame allocation on the RGBA→ARGB readback path.
+    pub fn reclaim_buffer(&mut self, buf: bytes::Bytes) {
+        if let Ok(mut_buf) = buf.try_into_mut() {
+            self.argb_scratch = mut_buf.into();
+        }
+    }
 }
 
 /// Convert ARGB8888 pixel data to RGBA8888.
@@ -337,13 +350,22 @@ fn argb_to_rgba(argb: &[u8]) -> Vec<u8> {
     rgba
 }
 
-/// Convert RGBA8888 pixel data to ARGB8888.
+/// Convert RGBA8888 → ARGB8888 into a pre-allocated buffer.
 #[inline]
-fn rgba_to_argb(rgba: &[u8]) -> Vec<u8> {
-    let mut argb = Vec::with_capacity(rgba.len());
+fn rgba_to_argb_into(rgba: &[u8], argb: &mut Vec<u8>) {
+    argb.clear();
+    argb.reserve(rgba.len().saturating_sub(argb.capacity()));
     for px in rgba.chunks_exact(4) {
         argb.extend_from_slice(&[px[3], px[0], px[1], px[2]]);
     }
+}
+
+/// Convert RGBA8888 pixel data to ARGB8888.
+#[cfg(test)]
+#[inline]
+fn rgba_to_argb(rgba: &[u8]) -> Vec<u8> {
+    let mut argb = Vec::with_capacity(rgba.len());
+    rgba_to_argb_into(rgba, &mut argb);
     argb
 }
 

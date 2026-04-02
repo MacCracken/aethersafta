@@ -200,6 +200,44 @@ jobs:
       - name: Run cargo-vet
         run: cargo vet || echo "::warning::cargo-vet found unaudited dependencies"
 
+  bench-regression:
+    name: Benchmark Regression Gate
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    needs: [check]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libpipewire-0.3-dev
+      - name: Run benchmarks (PR branch)
+        run: cargo bench --bench compose --bench convert --bench audio -- --save-baseline pr
+      - name: Checkout base branch
+        run: git checkout ${{ github.event.pull_request.base.sha }}
+      - name: Run benchmarks (base branch)
+        run: cargo bench --bench compose --bench convert --bench audio -- --save-baseline base
+      - name: Checkout PR branch again
+        run: git checkout ${{ github.event.pull_request.head.sha }}
+      - name: Compare benchmarks
+        run: |
+          # Use critcmp if available, otherwise parse criterion output
+          cargo install critcmp 2>/dev/null || true
+          if command -v critcmp &>/dev/null; then
+            OUTPUT=$(critcmp base pr --threshold 10 2>&1) || true
+            echo "$OUTPUT"
+            if echo "$OUTPUT" | grep -q "Regressed"; then
+              echo "::error::Benchmark regression >10% detected"
+              exit 1
+            fi
+          else
+            echo "critcmp not available, skipping detailed comparison"
+          fi
+
   fuzz:
     name: Fuzz (30s)
     runs-on: ubuntu-latest

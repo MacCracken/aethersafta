@@ -1,6 +1,7 @@
 //! Input sources: screen capture, camera, media files, images.
 
 pub mod image;
+pub mod manager;
 pub mod synthetic;
 
 use bytes::Bytes;

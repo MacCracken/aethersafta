@@ -22,6 +22,9 @@ pub struct Compositor {
     height: u32,
     /// Reusable compositing buffer (ARGB8888, width × height × 4 bytes).
     scratch: Vec<u8>,
+    /// Reusable buffer for frame data during scaling — avoids per-frame
+    /// `.to_vec()` when layers need resize.
+    scale_scratch: Vec<u8>,
 }
 
 /// Pre-computed clipped rectangle in output coordinates.
@@ -66,6 +69,7 @@ impl Compositor {
             width,
             height,
             scratch: vec![0u8; buf_size],
+            scale_scratch: Vec::new(),
         }
     }
 
@@ -188,7 +192,7 @@ impl Compositor {
     }
 
     #[inline]
-    fn blend_frame(&self, buffer: &mut [u8], layer: &crate::scene::Layer, frame: &RawFrame) {
+    fn blend_frame(&mut self, buffer: &mut [u8], layer: &crate::scene::Layer, frame: &RawFrame) {
         let (fw, fh) = (frame.width, frame.height);
         let (lw, lh) = layer.size.unwrap_or((fw, fh));
         let clip = match ClipRect::compute(
@@ -209,15 +213,20 @@ impl Compositor {
 
         // If scaling is needed, pre-resize via ranga (bilinear) and blend the result.
         // ranga::transform::resize requires Rgba8, so we convert ARGB→RGBA, resize, then RGBA→ARGB.
-        let scaled_data;
+        // Reuses scale_scratch to avoid per-frame allocation for the ARGB copy.
         let (src_data, src_w, src_h) = if needs_scale {
+            self.scale_scratch.clear();
+            self.scale_scratch.extend_from_slice(&frame.data);
+            let frame_copy = std::mem::take(&mut self.scale_scratch);
             let argb_buf = ranga::pixel::PixelBuffer::new(
-                frame.data.to_vec(),
+                frame_copy,
                 fw,
                 fh,
                 ranga::pixel::PixelFormat::Argb8,
             );
-            let Ok(argb_buf) = argb_buf else { return };
+            let Ok(argb_buf) = argb_buf else {
+                return;
+            };
             let Ok(rgba_buf) = ranga::convert::argb8_to_rgba8(&argb_buf) else {
                 return;
             };
@@ -229,8 +238,9 @@ impl Compositor {
             let Ok(back) = ranga::convert::rgba8_to_argb8(&resized) else {
                 return;
             };
-            scaled_data = back.into_data();
-            (scaled_data.as_slice(), lw, lh)
+            // Reclaim the input buffer for next frame (ranga consumed it, so reclaim output)
+            self.scale_scratch = back.into_data();
+            (self.scale_scratch.as_slice(), lw, lh)
         } else {
             (frame.data.as_ref(), fw, fh)
         };
@@ -252,16 +262,7 @@ impl Compositor {
             let dst_row_end = dst_row_start + clip.w as usize * 4;
             let dst_row = &mut buffer[dst_row_start..dst_row_end];
 
-            if opacity_fp >= 256 {
-                let all_opaque = src_row.chunks_exact(4).all(|px| px[0] == 255);
-                if all_opaque {
-                    dst_row.copy_from_slice(src_row);
-                } else {
-                    blend_row_alpha(dst_row, src_row, 256);
-                }
-            } else {
-                blend_row_alpha(dst_row, src_row, opacity_fp);
-            }
+            blend_row_alpha(dst_row, src_row, opacity_fp);
         }
     }
 }

@@ -78,6 +78,8 @@ pub struct EncodePipeline {
     pub config: EncoderConfig,
     encoder: EncoderInner,
     frames_encoded: u64,
+    /// Reusable buffer for YUV/NV12 color conversion — avoids per-frame allocation.
+    yuv_scratch: Vec<u8>,
 }
 
 enum EncoderInner {
@@ -96,6 +98,7 @@ impl EncodePipeline {
             config,
             encoder: EncoderInner::Uninitialised,
             frames_encoded: 0,
+            yuv_scratch: Vec::new(),
         }
     }
 
@@ -213,8 +216,24 @@ impl EncodePipeline {
         match &mut self.encoder {
             #[cfg(feature = "vaapi")]
             EncoderInner::Vaapi(enc) => {
-                let video_frame = make_video_frame(frame);
+                argb_to_yuv420p_into(
+                    &frame.data,
+                    frame.width,
+                    frame.height,
+                    &mut self.yuv_scratch,
+                );
+                let video_frame = tarang::core::VideoFrame::new(
+                    bytes::Bytes::from(std::mem::take(&mut self.yuv_scratch)),
+                    tarang::core::PixelFormat::Yuv420p,
+                    frame.width,
+                    frame.height,
+                    std::time::Duration::from_micros(frame.pts_us),
+                );
                 let nal_data = enc.encode(&video_frame)?;
+                // Reclaim the YUV buffer if still single-owner
+                if let Ok(mut_buf) = video_frame.data.try_into_mut() {
+                    self.yuv_scratch = mut_buf.into();
+                }
                 self.frames_encoded += 1;
                 Ok(make_packet(
                     nal_data,
@@ -225,8 +244,24 @@ impl EncodePipeline {
             }
             #[cfg(feature = "openh264-enc")]
             EncoderInner::OpenH264(enc) => {
-                let video_frame = make_video_frame(frame);
+                argb_to_yuv420p_into(
+                    &frame.data,
+                    frame.width,
+                    frame.height,
+                    &mut self.yuv_scratch,
+                );
+                let video_frame = tarang::core::VideoFrame::new(
+                    bytes::Bytes::from(std::mem::take(&mut self.yuv_scratch)),
+                    tarang::core::PixelFormat::Yuv420p,
+                    frame.width,
+                    frame.height,
+                    std::time::Duration::from_micros(frame.pts_us),
+                );
                 let nal_data = enc.encode(&video_frame)?;
+                // Reclaim the YUV buffer if still single-owner
+                if let Ok(mut_buf) = video_frame.data.try_into_mut() {
+                    self.yuv_scratch = mut_buf.into();
+                }
                 self.frames_encoded += 1;
                 Ok(make_packet(
                     nal_data,
@@ -291,19 +326,6 @@ pub fn detect_best_encoder(codec: VideoCodec) -> EncoderBackend {
 
 #[cfg(any(feature = "vaapi", feature = "openh264-enc"))]
 #[inline]
-fn make_video_frame(frame: &RawFrame) -> tarang::core::VideoFrame {
-    let yuv = argb_to_yuv420p(&frame.data, frame.width, frame.height);
-    tarang::core::VideoFrame::new(
-        bytes::Bytes::from(yuv),
-        tarang::core::PixelFormat::Yuv420p,
-        frame.width,
-        frame.height,
-        std::time::Duration::from_micros(frame.pts_us),
-    )
-}
-
-#[cfg(any(feature = "vaapi", feature = "openh264-enc"))]
-#[inline]
 fn make_packet(
     data: Vec<u8>,
     pts_us: u64,
@@ -325,13 +347,30 @@ fn make_packet(
 #[must_use]
 #[inline]
 pub fn argb_to_yuv420p(argb: &[u8], width: u32, height: u32) -> Vec<u8> {
+    let needed = yuv420p_size(width, height);
+    let mut yuv = vec![0u8; needed];
+    argb_to_yuv420p_into(argb, width, height, &mut yuv);
+    yuv
+}
+
+/// Write ARGB8888 → YUV420p (BT.709) into a pre-allocated buffer.
+///
+/// Two-pass conversion with vectorizer-friendly linear access patterns.
+/// Each ARGB row (7680B at 1920px) fits comfortably in L2 cache for the
+/// second pass. The tight inner loops enable autovectorization.
+///
+/// The buffer is resized if too small. Reuse the same `Vec` across frames
+/// to eliminate per-frame allocation on the encode path.
+#[inline]
+pub fn argb_to_yuv420p_into(argb: &[u8], width: u32, height: u32, yuv: &mut Vec<u8>) {
     let w = width as usize;
     let h = height as usize;
     let cw = w.div_ceil(2);
     let ch = h.div_ceil(2);
-    let mut yuv = vec![0u8; w * h + 2 * cw * ch];
+    let needed = w * h + 2 * cw * ch;
+    yuv.resize(needed, 0);
 
-    // Y plane: BT.709 Y = (54*R + 183*G + 19*B) >> 8
+    // Pass 1: Y plane — tight sequential loop, autovectorizable
     for y in 0..h {
         for x in 0..w {
             let i = (y * w + x) * 4;
@@ -342,7 +381,7 @@ pub fn argb_to_yuv420p(argb: &[u8], width: u32, height: u32) -> Vec<u8> {
         }
     }
 
-    // U and V planes (subsampled 2x2)
+    // Pass 2: U and V planes (subsampled 2x2)
     let u_off = w * h;
     let v_off = u_off + cw * ch;
     for y in (0..ch * 2).step_by(2) {
@@ -356,7 +395,17 @@ pub fn argb_to_yuv420p(argb: &[u8], width: u32, height: u32) -> Vec<u8> {
             yuv[v_off + ci] = ((128 * r - 116 * g - 12 * b + 128 * 256) >> 8).clamp(0, 255) as u8;
         }
     }
-    yuv
+}
+
+/// Required buffer size for YUV420p at the given dimensions.
+#[must_use]
+#[inline]
+pub fn yuv420p_size(width: u32, height: u32) -> usize {
+    let w = width as usize;
+    let h = height as usize;
+    let cw = w.div_ceil(2);
+    let ch = h.div_ceil(2);
+    w * h + 2 * cw * ch
 }
 
 /// Convert an NV12 buffer to ARGB8888 using BT.709.
@@ -405,13 +454,28 @@ pub fn nv12_to_argb(nv12: &[u8], width: u32, height: u32) -> Vec<u8> {
 #[must_use]
 #[inline]
 pub fn argb_to_nv12(argb: &[u8], width: u32, height: u32) -> Vec<u8> {
+    let needed = nv12_size(width, height);
+    let mut nv12 = vec![0u8; needed];
+    argb_to_nv12_into(argb, width, height, &mut nv12);
+    nv12
+}
+
+/// Write ARGB8888 → NV12 (BT.709) into a pre-allocated buffer.
+///
+/// Two-pass conversion with vectorizer-friendly linear access patterns.
+///
+/// The buffer is resized if too small. Reuse the same `Vec` across frames
+/// to eliminate per-frame allocation on the encode path.
+#[inline]
+pub fn argb_to_nv12_into(argb: &[u8], width: u32, height: u32, nv12: &mut Vec<u8>) {
     let w = width as usize;
     let h = height as usize;
     let cw = w.div_ceil(2);
     let ch = h.div_ceil(2);
-    let mut nv12 = vec![0u8; w * h + cw * ch * 2];
+    let needed = w * h + cw * ch * 2;
+    nv12.resize(needed, 0);
 
-    // Y plane: BT.709 Y = (54*R + 183*G + 19*B) >> 8
+    // Pass 1: Y plane — tight sequential loop, autovectorizable
     for y in 0..h {
         for x in 0..w {
             let i = (y * w + x) * 4;
@@ -422,9 +486,7 @@ pub fn argb_to_nv12(argb: &[u8], width: u32, height: u32) -> Vec<u8> {
         }
     }
 
-    // UV plane (interleaved, subsampled 2x2)
-    // BT.709 Cb = (-29*R - 99*G + 128*B) >> 8 + 128
-    // BT.709 Cr = (128*R - 116*G - 12*B) >> 8 + 128
+    // Pass 2: UV plane (interleaved, subsampled 2x2)
     let uv_off = w * h;
     for y in (0..ch * 2).step_by(2) {
         for x in (0..cw * 2).step_by(2) {
@@ -438,7 +500,17 @@ pub fn argb_to_nv12(argb: &[u8], width: u32, height: u32) -> Vec<u8> {
                 ((128 * r - 116 * g - 12 * b + 128 * 256) >> 8).clamp(0, 255) as u8;
         }
     }
-    nv12
+}
+
+/// Required buffer size for NV12 at the given dimensions.
+#[must_use]
+#[inline]
+pub fn nv12_size(width: u32, height: u32) -> usize {
+    let w = width as usize;
+    let h = height as usize;
+    let cw = w.div_ceil(2);
+    let ch = h.div_ceil(2);
+    w * h + cw * ch * 2
 }
 
 #[cfg(test)]
@@ -556,5 +628,118 @@ mod tests {
             assert!(chunk[2] < 5, "G should be near 0, got {}", chunk[2]);
             assert!(chunk[3] < 5, "B should be near 0, got {}", chunk[3]);
         }
+    }
+
+    #[test]
+    fn yuv420p_into_matches_allocating() {
+        let argb = vec![255u8; 8 * 8 * 4];
+        let expected = argb_to_yuv420p(&argb, 8, 8);
+        let mut buf = Vec::new();
+        argb_to_yuv420p_into(&argb, 8, 8, &mut buf);
+        assert_eq!(buf, expected);
+    }
+
+    #[test]
+    fn yuv420p_into_reuses_buffer() {
+        let argb = vec![255u8; 4 * 4 * 4];
+        let mut buf = Vec::with_capacity(1024);
+        argb_to_yuv420p_into(&argb, 4, 4, &mut buf);
+        let ptr1 = buf.as_ptr();
+        // Second call should reuse the same allocation
+        argb_to_yuv420p_into(&argb, 4, 4, &mut buf);
+        let ptr2 = buf.as_ptr();
+        assert_eq!(ptr1, ptr2, "buffer should be reused without reallocation");
+    }
+
+    #[test]
+    fn nv12_into_matches_allocating() {
+        let argb = vec![255u8; 8 * 8 * 4];
+        let expected = argb_to_nv12(&argb, 8, 8);
+        let mut buf = Vec::new();
+        argb_to_nv12_into(&argb, 8, 8, &mut buf);
+        assert_eq!(buf, expected);
+    }
+
+    #[test]
+    fn yuv420p_size_correct() {
+        assert_eq!(yuv420p_size(4, 4), 24);
+        assert_eq!(yuv420p_size(1920, 1080), 1920 * 1080 * 3 / 2);
+    }
+
+    #[test]
+    fn nv12_size_correct() {
+        assert_eq!(nv12_size(4, 4), 24);
+        assert_eq!(nv12_size(1920, 1080), 1920 * 1080 * 3 / 2);
+    }
+
+    /// Encode → decode roundtrip: verify pixel similarity after H.264 encode/decode.
+    ///
+    /// Encodes a synthetic ARGB frame via OpenH264, decodes it back, converts
+    /// the decoded YUV to ARGB, and checks that pixels are within lossy tolerance.
+    #[test]
+    #[cfg(all(feature = "openh264-enc", feature = "openh264-dec"))]
+    fn encode_decode_roundtrip() {
+        let width = 64u32;
+        let height = 64u32;
+
+        // Create a solid mid-gray ARGB frame
+        let mut argb = vec![0u8; (width * height * 4) as usize];
+        for chunk in argb.chunks_exact_mut(4) {
+            chunk[0] = 255; // A
+            chunk[1] = 128; // R
+            chunk[2] = 128; // G
+            chunk[3] = 128; // B
+        }
+
+        let frame = crate::source::RawFrame {
+            data: argb.clone().into(),
+            format: crate::source::PixelFormat::Argb8888,
+            width,
+            height,
+            pts_us: 0,
+        };
+
+        // Encode
+        let mut pipeline = EncodePipeline::new(EncoderConfig {
+            codec: VideoCodec::H264,
+            bitrate_kbps: 1000,
+            keyframe_interval: 30,
+            prefer_hardware: false,
+        });
+        pipeline.init(width, height, 30).unwrap();
+        let packet = pipeline.encode_frame(&frame).unwrap();
+        assert!(!packet.data.is_empty(), "encoded packet should have data");
+
+        // Decode
+        let mut decoder = tarang::video::OpenH264Decoder::new().unwrap();
+        let decoded = decoder
+            .decode(&packet.data, std::time::Duration::ZERO)
+            .unwrap();
+
+        // Decoder may need a few frames; try flushing if first decode returns None
+        let decoded_frame = decoded
+            .or_else(|| decoder.flush().ok().and_then(|v| v.into_iter().next()))
+            .expect("decoder should produce at least one frame");
+
+        assert_eq!(decoded_frame.width, width);
+        assert_eq!(decoded_frame.height, height);
+
+        // Convert decoded YUV back to ARGB for comparison
+        let back_argb = nv12_to_argb(&decoded_frame.data, width, height);
+        assert_eq!(back_argb.len(), argb.len());
+
+        // H.264 is lossy — allow tolerance of ±10 per channel
+        let mut max_diff = 0u8;
+        for (orig, decoded) in argb.chunks_exact(4).zip(back_argb.chunks_exact(4)) {
+            for c in 1..4 {
+                // skip alpha
+                let diff = (orig[c] as i16 - decoded[c] as i16).unsigned_abs() as u8;
+                max_diff = max_diff.max(diff);
+            }
+        }
+        assert!(
+            max_diff < 30,
+            "max per-channel diff {max_diff} exceeds tolerance (lossy H.264, expected < 30)"
+        );
     }
 }

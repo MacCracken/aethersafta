@@ -2,7 +2,9 @@
 
 use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
 
-use aethersafta::encode::{argb_to_nv12, argb_to_yuv420p, nv12_to_argb};
+use aethersafta::encode::{
+    argb_to_nv12, argb_to_nv12_into, argb_to_yuv420p, argb_to_yuv420p_into, nv12_to_argb,
+};
 
 fn make_argb(width: u32, height: u32) -> Vec<u8> {
     let size = (width * height * 4) as usize;
@@ -145,6 +147,32 @@ fn bench_odd_dimensions(c: &mut Criterion) {
     group.finish();
 }
 
+// ---------------------------------------------------------------------------
+// Buffer reuse: _into variants vs allocating
+// ---------------------------------------------------------------------------
+
+fn bench_buffer_reuse(c: &mut Criterion) {
+    let mut group = c.benchmark_group("buffer_reuse");
+    let argb = make_argb(1920, 1080);
+
+    group.bench_function("yuv420p_allocating", |b| {
+        b.iter(|| argb_to_yuv420p(&argb, 1920, 1080))
+    });
+    group.bench_function("yuv420p_into_reuse", |b| {
+        let mut buf = Vec::new();
+        b.iter(|| argb_to_yuv420p_into(&argb, 1920, 1080, &mut buf))
+    });
+    group.bench_function("nv12_allocating", |b| {
+        b.iter(|| argb_to_nv12(&argb, 1920, 1080))
+    });
+    group.bench_function("nv12_into_reuse", |b| {
+        let mut buf = Vec::new();
+        b.iter(|| argb_to_nv12_into(&argb, 1920, 1080, &mut buf))
+    });
+
+    group.finish();
+}
+
 criterion_group!(
     benches,
     bench_argb_to_yuv420p,
@@ -153,5 +181,6 @@ criterion_group!(
     bench_nv12_roundtrip,
     bench_yuv420p_roundtrip,
     bench_odd_dimensions,
+    bench_buffer_reuse,
 );
 criterion_main!(benches);

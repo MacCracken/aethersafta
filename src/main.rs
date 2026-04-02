@@ -7,7 +7,6 @@
 //!   aethersafta info
 //!   aethersafta --version
 
-use std::collections::HashMap;
 use std::time::Instant;
 
 use clap::{Parser, Subcommand};
@@ -19,7 +18,9 @@ use aethersafta::output::file::FileOutput;
 use aethersafta::scene::compositor::Compositor;
 use aethersafta::scene::{Layer, LayerContent, SceneGraph};
 use aethersafta::source::Source;
+use aethersafta::source::SourceConfig;
 use aethersafta::source::image::ImageSource;
+use aethersafta::source::manager::{VideoCaptureManager, collect_layer_frames};
 use aethersafta::timing::FrameClock;
 
 #[derive(Parser)]
@@ -39,9 +40,9 @@ enum Commands {
     Info,
     /// Record a composited scene to file
     Record {
-        /// Source: "screen", "image:<path>", or "color:<RRGGBBAA>"
-        #[arg(long, default_value = "screen")]
-        source: String,
+        /// Sources: "screen", "image:<path>", "color:<RRGGBBAA>" (repeatable)
+        #[arg(long, default_values_t = vec!["screen".to_string()])]
+        source: Vec<String>,
         /// Output file path (.h264 for raw H.264, other for raw frames)
         #[arg(short, long)]
         output: String,
@@ -69,9 +70,9 @@ enum Commands {
     },
     /// Preview composited output (display only, no recording)
     Preview {
-        /// Source: "screen", "image:<path>", or "color:<RRGGBBAA>"
-        #[arg(long, default_value = "screen")]
-        source: String,
+        /// Sources: "screen", "image:<path>", "color:<RRGGBBAA>" (repeatable)
+        #[arg(long, default_values_t = vec!["screen".to_string()])]
+        source: Vec<String>,
         /// Target framerate
         #[arg(long, default_value = "30")]
         fps: u32,
@@ -191,54 +192,56 @@ fn cmd_info() {
     println!("  + SRT streaming");
 }
 
-/// Build a scene graph with a single layer from the --source argument.
+/// Build a scene graph and video capture manager from --source arguments.
 fn build_scene(
-    source_str: &str,
+    sources: &[String],
     width: u32,
     height: u32,
     fps: u32,
-) -> anyhow::Result<(SceneGraph, Option<Box<dyn Source>>)> {
+) -> anyhow::Result<(SceneGraph, VideoCaptureManager)> {
     let mut scene = SceneGraph::new(width, height, fps);
+    let mut mgr = VideoCaptureManager::new();
 
-    if let Some(path) = source_str.strip_prefix("image:") {
-        let src = ImageSource::open(path)?;
-        let mut layer = Layer::new(
-            src.name(),
-            LayerContent::Source {
-                source_id: src.id(),
-            },
-        );
-        layer.size = Some((width, height));
-        scene.add_layer(layer);
-        Ok((scene, Some(Box::new(src))))
-    } else if let Some(hex) = source_str.strip_prefix("color:") {
-        let color = parse_hex_color(hex)?;
-        scene.add_layer(Layer::new("fill", LayerContent::ColorFill { color }));
-        Ok((scene, None))
-    } else if source_str == "screen" {
-        anyhow::bail!("screen capture not yet implemented — use image:<path> or color:<RRGGBBAA>");
-    } else {
-        anyhow::bail!("unknown source: {source_str}");
-    }
-}
+    for (i, source_str) in sources.iter().enumerate() {
+        let z = i as i32;
 
-/// Capture frames from source for all matching layers in the scene.
-fn capture_source_frames(
-    scene: &SceneGraph,
-    source: &Option<Box<dyn Source>>,
-) -> HashMap<aethersafta::scene::LayerId, aethersafta::source::RawFrame> {
-    let mut frames = HashMap::new();
-    if let Some(src) = source {
-        for layer in scene.layers() {
-            if let LayerContent::Source { source_id } = &layer.content
-                && *source_id == src.id()
-                && let Ok(Some(f)) = src.capture_frame()
-            {
-                frames.insert(layer.id, f);
-            }
+        if let Some(path) = source_str.strip_prefix("image:") {
+            let src = ImageSource::open(path)?;
+            let mut layer = Layer::new(
+                src.name(),
+                LayerContent::Source {
+                    source_id: src.id(),
+                },
+            );
+            layer.size = Some((width, height));
+            layer.z_index = z;
+            scene.add_layer(layer);
+            mgr.add_source(
+                Box::new(src),
+                SourceConfig::Image { path: path.into() },
+                fps,
+            );
+        } else if let Some(hex) = source_str.strip_prefix("color:") {
+            let color = parse_hex_color(hex)?;
+            let mut layer = Layer::new("fill", LayerContent::ColorFill { color });
+            layer.z_index = z;
+            scene.add_layer(layer);
+        } else if source_str == "screen" || source_str.starts_with("screen:") {
+            anyhow::bail!(
+                "screen capture not yet implemented — use image:<path> or color:<RRGGBBAA>"
+            );
+        } else if source_str.starts_with("camera:") {
+            anyhow::bail!("camera capture not yet implemented — build with --features camera");
+        } else if source_str.starts_with("media:") {
+            anyhow::bail!(
+                "media file source not yet implemented — build with --features openh264-dec"
+            );
+        } else {
+            anyhow::bail!("unknown source: {source_str}");
         }
     }
-    frames
+
+    Ok((scene, mgr))
 }
 
 fn parse_hex_color(hex: &str) -> anyhow::Result<[u8; 4]> {
@@ -302,7 +305,7 @@ fn setup_audio(
 
 #[allow(clippy::too_many_arguments)]
 fn cmd_record(
-    source_str: &str,
+    sources: &[String],
     output_path: &str,
     duration_secs: u64,
     fps: u32,
@@ -312,7 +315,7 @@ fn cmd_record(
     audio_arg: &str,
     audio_gain: f32,
 ) -> anyhow::Result<()> {
-    let (scene, source) = build_scene(source_str, width, height, fps)?;
+    let (scene, mut capture_mgr) = build_scene(sources, width, height, fps)?;
     let mut compositor = Compositor::new(width, height);
     let mut clock = FrameClock::new(fps);
 
@@ -371,7 +374,8 @@ fn cmd_record(
         clock.tick();
 
         // Video: capture → composite → encode → reclaim → output
-        let frames = capture_source_frames(&scene, &source);
+        let source_frames = capture_mgr.capture_all(clock.current_pts_us());
+        let frames = collect_layer_frames(&scene, &source_frames);
         let composited = compositor.compose(&scene, &frames, clock.current_pts_us());
         let packet = encoder.encode_frame(&composited)?;
         compositor.reclaim_buffer(composited.data);
@@ -446,10 +450,10 @@ fn cmd_record(
     Ok(())
 }
 
-fn cmd_preview(source_str: &str, fps: u32, max_frames: u64) -> anyhow::Result<()> {
+fn cmd_preview(sources: &[String], fps: u32, max_frames: u64) -> anyhow::Result<()> {
     let width = 1920;
     let height = 1080;
-    let (scene, source) = build_scene(source_str, width, height, fps)?;
+    let (scene, mut capture_mgr) = build_scene(sources, width, height, fps)?;
     let mut compositor = Compositor::new(width, height);
     let mut clock = FrameClock::new(fps);
 
@@ -465,7 +469,8 @@ fn cmd_preview(source_str: &str, fps: u32, max_frames: u64) -> anyhow::Result<()
     for frame_num in 0..total {
         clock.tick();
 
-        let frames = capture_source_frames(&scene, &source);
+        let source_frames = capture_mgr.capture_all(clock.current_pts_us());
+        let frames = collect_layer_frames(&scene, &source_frames);
 
         let composited = compositor.compose(&scene, &frames, clock.current_pts_us());
         let composited_pts = composited.pts_us;

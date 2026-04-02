@@ -13,7 +13,7 @@ categories = ["multimedia", "multimedia::video", "multimedia::encoding"]
 
 [features]
 default = ["pipewire", "hwaccel"]
-full = ["pipewire", "hwaccel", "rtmp", "srt", "openh264-enc", "vaapi", "gpu"]
+full = ["pipewire", "hwaccel", "rtmp", "srt", "openh264-enc", "openh264-dec", "vaapi", "gpu"]
 # GPU-accelerated compositing via soorat
 gpu = ["dep:soorat", "dep:wgpu", "dep:pollster"]
 # Audio capture and processing via dhvani
@@ -22,6 +22,8 @@ pipewire = ["dhvani/pipewire"]
 hwaccel = ["dep:ai-hwaccel"]
 # H.264 software encoding via openh264
 openh264-enc = ["tarang/openh264-enc"]
+# H.264 software decoding via openh264
+openh264-dec = ["tarang/openh264"]
 # H.264 hardware encoding via VA-API (Intel/AMD)
 vaapi = ["tarang/vaapi", "hwaccel"]
 # Streaming output protocols
