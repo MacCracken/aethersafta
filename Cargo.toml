@@ -1,6 +1,6 @@
 [package]
 name = "aethersafta"
-version = "0.25.3"
+version = "0.50.0"
 edition = "2024"
 rust-version = "1.89"
 license = "AGPL-3.0-only"
@@ -14,8 +14,8 @@ categories = ["multimedia", "multimedia::video", "multimedia::encoding"]
 [features]
 default = ["pipewire", "hwaccel"]
 full = ["pipewire", "hwaccel", "rtmp", "srt", "openh264-enc", "openh264-dec", "vaapi", "gpu", "camera", "wayland"]
-# GPU-accelerated compositing via soorat
-gpu = ["dep:soorat", "dep:wgpu", "dep:pollster"]
+# GPU-accelerated compositing via soorat + mabda (GPU foundation)
+gpu = ["dep:soorat", "dep:mabda", "dep:wgpu", "dep:pollster"]
 # Audio capture and processing via dhvani
 pipewire = ["dhvani/pipewire"]
 # Hardware-accelerated encoding (NVENC, VA-API, QSV, AMF)
@@ -75,8 +75,9 @@ wayland-client = { version = "0.31", optional = true }
 wayland-protocols-wlr = { version = "0.3", optional = true, features = ["client"] }
 libc = { version = "0.2", optional = true }
 
-# GPU-accelerated compositing (optional — soorat rendering engine)
+# GPU-accelerated compositing (optional — soorat rendering engine + mabda GPU foundation)
 soorat = { version = "1", optional = true }
+mabda = { version = "1", optional = true }
 wgpu = { version = "29", optional = true }
 pollster = { version = "0.4", optional = true }
 
