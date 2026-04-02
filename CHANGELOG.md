@@ -219,7 +219,7 @@ Hardening release: project infrastructure, deeper crate integration, expanded te
 
 ### Added
 
-- **Project docs** — LICENSE (AGPL-3.0-only), CONTRIBUTING.md, CODE_OF_CONDUCT.md (Contributor Covenant 2.1), SECURITY.md (threat model, reporting process)
+- **Project docs** — LICENSE (GPL-3.0-only), CONTRIBUTING.md, CODE_OF_CONDUCT.md (Contributor Covenant 2.1), SECURITY.md (threat model, reporting process)
 - **CI hardening** — doc verification job, `cargo-semver-checks`, `cargo-vet` with Mozilla imports, coverage threshold 85%+, fuzz job (30s/target on main push)
 - **`codecov.yml`** — project target 85%, patch target 80%, ignores benches/fuzz/examples
 - **Example binaries** — `examples/compose.rs`, `examples/encode.rs`, `examples/record.rs`

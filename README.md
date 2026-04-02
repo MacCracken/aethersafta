@@ -9,7 +9,7 @@ Multi-source capture, scene graph compositing, hardware-accelerated encoding, an
 
 [![Crates.io](https://img.shields.io/crates/v/aethersafta.svg)](https://crates.io/crates/aethersafta)
 [![CI](https://github.com/MacCracken/aethersafta/actions/workflows/ci.yml/badge.svg)](https://github.com/MacCracken/aethersafta/actions/workflows/ci.yml)
-[![License: AGPL-3.0](https://img.shields.io/badge/license-AGPL--3.0-blue.svg)](LICENSE)
+[![License: GPL-3.0](https://img.shields.io/badge/license-GPL--3.0-blue.svg)](LICENSE)
 
 ---
 
@@ -275,7 +275,7 @@ The `VERSION` file is the single source of truth. Use `./scripts/version-bump.sh
 
 ## License
 
-AGPL-3.0-only. See [LICENSE](LICENSE) for details.
+GPL-3.0-only. See [LICENSE](LICENSE) for details.
 
 ---
 

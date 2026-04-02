@@ -27,9 +27,8 @@ allow = [
     "MIT-0",
     "CDLA-Permissive-2.0",
     # Copyleft — our own crates and transitive deps
-    "AGPL-3.0-only",
-    "GPL-3.0",
     "GPL-3.0-only",
+    "AGPL-3.0-only",
     "LGPL-2.1-or-later",
 ]
 

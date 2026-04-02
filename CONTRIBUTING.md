@@ -3,7 +3,7 @@
 Thank you for your interest in contributing to aethersafta, a real-time media
 compositing engine. This document covers everything you need to get started.
 
-aethersafta is licensed under **AGPL-3.0-only**. By submitting a contribution
+aethersafta is licensed under **GPL-3.0-only**. By submitting a contribution
 you agree to license it under the same terms.
 
 ## Getting Started

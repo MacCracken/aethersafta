@@ -5,7 +5,7 @@
 **Aethersafta** (Greek aether + Arabic safha (surface)) — Real-time media compositing — scene graph, multi-source capture, HW encoding, streaming output
 
 - **Type**: Flat crate with binary
-- **License**: AGPL-3.0-only
+- **License**: GPL-3.0-only
 - **MSRV**: 1.89
 - **Version**: SemVer 0.D.M pre-1.0
 
