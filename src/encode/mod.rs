@@ -79,6 +79,7 @@ pub struct EncodePipeline {
     encoder: EncoderInner,
     frames_encoded: u64,
     /// Reusable buffer for YUV/NV12 color conversion — avoids per-frame allocation.
+    #[cfg(any(feature = "vaapi", feature = "openh264-enc"))]
     yuv_scratch: Vec<u8>,
 }
 
@@ -98,6 +99,7 @@ impl EncodePipeline {
             config,
             encoder: EncoderInner::Uninitialised,
             frames_encoded: 0,
+            #[cfg(any(feature = "vaapi", feature = "openh264-enc"))]
             yuv_scratch: Vec::new(),
         }
     }
