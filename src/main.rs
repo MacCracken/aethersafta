@@ -210,6 +210,28 @@ fn cmd_info() {
         println!();
     }
 
+    // Screens
+    #[cfg(feature = "wayland")]
+    {
+        println!("Screens:");
+        match aethersafta::source::screen::enumerate_screens() {
+            Ok(screens) if screens.is_empty() => println!("  No outputs detected"),
+            Ok(screens) => {
+                for s in &screens {
+                    let name = s.name.as_deref().unwrap_or("unknown");
+                    println!("  screen:{} — {} ({}x{})", s.index, name, s.width, s.height);
+                }
+            }
+            Err(e) => println!("  Wayland not available: {e}"),
+        }
+        println!();
+    }
+    #[cfg(not(feature = "wayland"))]
+    {
+        println!("Screens: (disabled — build with --features wayland)");
+        println!();
+    }
+
     println!("Supported outputs: file (raw H.264 bitstream)");
     #[cfg(feature = "rtmp")]
     println!("  + RTMP streaming");
@@ -252,9 +274,25 @@ fn build_scene(
             layer.z_index = z;
             scene.add_layer(layer);
         } else if source_str == "screen" || source_str.starts_with("screen:") {
-            anyhow::bail!(
-                "screen capture not yet implemented — use image:<path> or color:<RRGGBBAA>"
-            );
+            #[cfg(feature = "wayland")]
+            {
+                let monitor = source_str
+                    .strip_prefix("screen:")
+                    .and_then(|s| s.parse::<u32>().ok());
+                let src = aethersafta::source::screen::ScreenSource::open(monitor)?;
+                let mut layer = Layer::new(
+                    src.name(),
+                    LayerContent::Source {
+                        source_id: src.id(),
+                    },
+                );
+                layer.size = Some((width, height));
+                layer.z_index = z;
+                scene.add_layer(layer);
+                mgr.add_source(Box::new(src), SourceConfig::Screen { monitor }, fps);
+            }
+            #[cfg(not(feature = "wayland"))]
+            anyhow::bail!("screen capture requires --features wayland");
         } else if let Some(device) = source_str.strip_prefix("camera:") {
             #[cfg(feature = "camera")]
             {

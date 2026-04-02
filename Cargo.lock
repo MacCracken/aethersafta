@@ -46,6 +46,7 @@ dependencies = [
  "criterion",
  "dhvani",
  "image",
+ "libc",
  "pollster",
  "proptest",
  "ranga",
@@ -58,6 +59,8 @@ dependencies = [
  "tracing-subscriber",
  "uuid",
  "v4l",
+ "wayland-client",
+ "wayland-protocols-wlr",
  "wgpu",
 ]
 

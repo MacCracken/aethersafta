@@ -7,6 +7,9 @@ pub mod synthetic;
 #[cfg(feature = "camera")]
 pub mod camera;
 
+#[cfg(feature = "wayland")]
+pub mod screen;
+
 use bytes::Bytes;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;

@@ -13,7 +13,7 @@ categories = ["multimedia", "multimedia::video", "multimedia::encoding"]
 
 [features]
 default = ["pipewire", "hwaccel"]
-full = ["pipewire", "hwaccel", "rtmp", "srt", "openh264-enc", "openh264-dec", "vaapi", "gpu", "camera"]
+full = ["pipewire", "hwaccel", "rtmp", "srt", "openh264-enc", "openh264-dec", "vaapi", "gpu", "camera", "wayland"]
 # GPU-accelerated compositing via soorat
 gpu = ["dep:soorat", "dep:wgpu", "dep:pollster"]
 # Audio capture and processing via dhvani
@@ -28,6 +28,8 @@ openh264-dec = ["tarang/openh264"]
 vaapi = ["tarang/vaapi", "hwaccel"]
 # V4L2 camera capture (Linux)
 camera = ["dep:v4l"]
+# Wayland screen capture via wlr-screencopy
+wayland = ["dep:wayland-client", "dep:wayland-protocols-wlr", "dep:libc"]
 # Streaming output protocols
 rtmp = []
 srt = []
@@ -67,6 +69,11 @@ dhvani = { version = "1", default-features = false, features = ["dsp", "graph"] 
 
 # V4L2 camera capture (optional — Linux only)
 v4l = { version = "0.14", optional = true }
+
+# Wayland screen capture (optional — Linux only)
+wayland-client = { version = "0.31", optional = true }
+wayland-protocols-wlr = { version = "0.3", optional = true, features = ["client"] }
+libc = { version = "0.2", optional = true }
 
 # GPU-accelerated compositing (optional — soorat rendering engine)
 soorat = { version = "1", optional = true }
