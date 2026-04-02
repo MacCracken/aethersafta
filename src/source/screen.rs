@@ -348,8 +348,9 @@ impl Source for ScreenSource {
             (false, true, Some(fmt)) => fmt,
         };
 
-        let buf_size = (state.shm_stride * state.shm_height) as usize;
-        if buf_size == 0 {
+        let buf_size = (state.shm_stride as usize) * (state.shm_height as usize);
+        // Sanity: reject buffers > 256MB (8K@32bpp with stride padding)
+        if buf_size == 0 || buf_size > 256 * 1024 * 1024 {
             frame.destroy();
             inner.queue.roundtrip(&mut state).ok();
             return Ok(None);

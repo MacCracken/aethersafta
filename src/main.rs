@@ -320,10 +320,31 @@ fn build_scene(
                 let _ = device;
                 anyhow::bail!("camera capture requires --features camera");
             }
-        } else if source_str.starts_with("media:") {
-            anyhow::bail!(
-                "media file source not yet implemented — build with --features openh264-dec"
-            );
+        } else if let Some(path) = source_str.strip_prefix("media:") {
+            #[cfg(feature = "openh264-dec")]
+            {
+                let src = aethersafta::source::media::MediaFileSource::open(path)?;
+                let media_fps = src.fps().round() as u32;
+                let mut layer = Layer::new(
+                    src.name(),
+                    LayerContent::Source {
+                        source_id: src.id(),
+                    },
+                );
+                layer.size = Some((width, height));
+                layer.z_index = z;
+                scene.add_layer(layer);
+                mgr.add_source(
+                    Box::new(src),
+                    SourceConfig::MediaFile { path: path.into() },
+                    media_fps.max(1),
+                );
+            }
+            #[cfg(not(feature = "openh264-dec"))]
+            {
+                let _ = path;
+                anyhow::bail!("media file source requires --features openh264-dec");
+            }
         } else {
             anyhow::bail!("unknown source: {source_str}");
         }

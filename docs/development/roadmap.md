@@ -65,18 +65,18 @@ Items handled by these crates are noted inline. Aethersafta's scope is **orchest
 ## v0.24.4 — Multi-Source & Capture
 
 ### Multi-source capture
-- [ ] Concurrent capture from multiple sources (screen + camera + media)
-- [ ] Per-source frame clock with independent capture rates
-- [ ] Source hot-plug: add/remove sources while compositing is live
+- [x] Concurrent capture from multiple sources (`VideoCaptureManager`, `--source` repeatable)
+- [x] Per-source frame clock with independent capture rates
+- [x] Source hot-plug: add/remove sources while compositing is live (`SourceEvent`)
 
 ### Camera capture
-- [ ] V4L2 camera source (webcam, capture cards)
-- [ ] Device enumeration and capability querying
-- [ ] Auto-detect resolution, framerate, pixel format
+- [x] V4L2 camera source (webcam, capture cards) — `camera` feature, `v4l` crate
+- [x] Device enumeration and capability querying (`enumerate_cameras()`)
+- [x] Auto-detect resolution, framerate, pixel format (MJPEG > YUYV > NV12 priority)
 
 ### Screen & media capture
-- [ ] Screen capture via Wayland `wlr-screencopy-unstable-v1` protocol
-- [ ] Media file source (video playback via tarang decode)
+- [x] Screen capture via Wayland `wlr-screencopy-unstable-v1` protocol — `wayland` feature
+- [x] Media file source (video playback via tarang decode) — `openh264-dec` feature
 
 > **Delegated to tarang**: Hardware-accelerated encoding (NVENC, VA-API, QSV) — aethersafta selects encoder via `ai-hwaccel` and passes frames to tarang. **Delegated to dhvani**: PipeWire capture, audio mixing, metering.
 

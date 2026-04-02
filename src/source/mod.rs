@@ -7,6 +7,9 @@ pub mod synthetic;
 #[cfg(feature = "camera")]
 pub mod camera;
 
+#[cfg(feature = "openh264-dec")]
+pub mod media;
+
 #[cfg(feature = "wayland")]
 pub mod screen;
 
