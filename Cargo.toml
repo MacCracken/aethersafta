@@ -13,7 +13,7 @@ categories = ["multimedia", "multimedia::video", "multimedia::encoding"]
 
 [features]
 default = ["pipewire", "hwaccel"]
-full = ["pipewire", "hwaccel", "rtmp", "srt", "openh264-enc", "openh264-dec", "vaapi", "gpu"]
+full = ["pipewire", "hwaccel", "rtmp", "srt", "openh264-enc", "openh264-dec", "vaapi", "gpu", "camera"]
 # GPU-accelerated compositing via soorat
 gpu = ["dep:soorat", "dep:wgpu", "dep:pollster"]
 # Audio capture and processing via dhvani
@@ -26,6 +26,8 @@ openh264-enc = ["tarang/openh264-enc"]
 openh264-dec = ["tarang/openh264"]
 # H.264 hardware encoding via VA-API (Intel/AMD)
 vaapi = ["tarang/vaapi", "hwaccel"]
+# V4L2 camera capture (Linux)
+camera = ["dep:v4l"]
 # Streaming output protocols
 rtmp = []
 srt = []
@@ -62,6 +64,9 @@ ai-hwaccel = { version = "1", optional = true, default-features = false }
 
 # Audio capture, mixing, DSP, metering
 dhvani = { version = "1", default-features = false, features = ["dsp", "graph"] }
+
+# V4L2 camera capture (optional — Linux only)
+v4l = { version = "0.14", optional = true }
 
 # GPU-accelerated compositing (optional — soorat rendering engine)
 soorat = { version = "1", optional = true }

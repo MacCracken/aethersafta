@@ -185,6 +185,31 @@ fn cmd_info() {
     println!("  Capture: (disabled — build with --features pipewire)");
     println!();
 
+    // Cameras
+    #[cfg(feature = "camera")]
+    {
+        println!("Cameras:");
+        let cameras = aethersafta::source::camera::enumerate_cameras();
+        if cameras.is_empty() {
+            println!("  No V4L2 cameras detected");
+        } else {
+            for cam in &cameras {
+                let cap = if cam.can_capture {
+                    "capture"
+                } else {
+                    "no-capture"
+                };
+                println!("  {} — {} ({}, {})", cam.path, cam.card, cam.driver, cap);
+            }
+        }
+        println!();
+    }
+    #[cfg(not(feature = "camera"))]
+    {
+        println!("Cameras: (disabled — build with --features camera)");
+        println!();
+    }
+
     println!("Supported outputs: file (raw H.264 bitstream)");
     #[cfg(feature = "rtmp")]
     println!("  + RTMP streaming");
@@ -230,8 +255,33 @@ fn build_scene(
             anyhow::bail!(
                 "screen capture not yet implemented — use image:<path> or color:<RRGGBBAA>"
             );
-        } else if source_str.starts_with("camera:") {
-            anyhow::bail!("camera capture not yet implemented — build with --features camera");
+        } else if let Some(device) = source_str.strip_prefix("camera:") {
+            #[cfg(feature = "camera")]
+            {
+                let src = aethersafta::source::camera::CameraSource::open(device)?;
+                let cam_fps = src.fps();
+                let mut layer = Layer::new(
+                    src.name(),
+                    LayerContent::Source {
+                        source_id: src.id(),
+                    },
+                );
+                layer.size = Some((width, height));
+                layer.z_index = z;
+                scene.add_layer(layer);
+                mgr.add_source(
+                    Box::new(src),
+                    SourceConfig::Camera {
+                        device: device.into(),
+                    },
+                    cam_fps,
+                );
+            }
+            #[cfg(not(feature = "camera"))]
+            {
+                let _ = device;
+                anyhow::bail!("camera capture requires --features camera");
+            }
         } else if source_str.starts_with("media:") {
             anyhow::bail!(
                 "media file source not yet implemented — build with --features openh264-dec"

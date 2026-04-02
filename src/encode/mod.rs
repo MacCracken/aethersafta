@@ -365,6 +365,9 @@ pub fn argb_to_yuv420p(argb: &[u8], width: u32, height: u32) -> Vec<u8> {
 pub fn argb_to_yuv420p_into(argb: &[u8], width: u32, height: u32, yuv: &mut Vec<u8>) {
     let w = width as usize;
     let h = height as usize;
+    if w == 0 || h == 0 || argb.len() < w * h * 4 {
+        return;
+    }
     let cw = w.div_ceil(2);
     let ch = h.div_ceil(2);
     let needed = w * h + 2 * cw * ch;
@@ -418,8 +421,15 @@ pub fn yuv420p_size(width: u32, height: u32) -> usize {
 pub fn nv12_to_argb(nv12: &[u8], width: u32, height: u32) -> Vec<u8> {
     let w = width as usize;
     let h = height as usize;
+    if w == 0 || h == 0 {
+        return Vec::new();
+    }
     let cw = w.div_ceil(2);
     let ch = h.div_ceil(2);
+    let expected = w * h + cw * ch * 2;
+    if nv12.len() < expected {
+        return vec![0u8; w * h * 4]; // return black frame on invalid input
+    }
     let uv_off = w * h;
     let uv_stride = cw * 2;
     let mut argb = vec![0u8; w * h * 4];
@@ -470,6 +480,9 @@ pub fn argb_to_nv12(argb: &[u8], width: u32, height: u32) -> Vec<u8> {
 pub fn argb_to_nv12_into(argb: &[u8], width: u32, height: u32, nv12: &mut Vec<u8>) {
     let w = width as usize;
     let h = height as usize;
+    if w == 0 || h == 0 || argb.len() < w * h * 4 {
+        return;
+    }
     let cw = w.div_ceil(2);
     let ch = h.div_ceil(2);
     let needed = w * h + cw * ch * 2;

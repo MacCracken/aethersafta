@@ -198,7 +198,9 @@ impl GpuCompositor {
         });
 
         for (i, item) in work.iter().enumerate() {
-            let cached = self.texture_cache.get(&item.layer_id).unwrap();
+            let Some(cached) = self.texture_cache.get(&item.layer_id) else {
+                continue;
+            };
             let layer_batch = SpriteBatch {
                 sprites: vec![item.sprite.clone()],
             };
@@ -354,7 +356,7 @@ fn argb_to_rgba(argb: &[u8]) -> Vec<u8> {
 #[inline]
 fn rgba_to_argb_into(rgba: &[u8], argb: &mut Vec<u8>) {
     argb.clear();
-    argb.reserve(rgba.len().saturating_sub(argb.capacity()));
+    argb.reserve(rgba.len());
     for px in rgba.chunks_exact(4) {
         argb.extend_from_slice(&[px[3], px[0], px[1], px[2]]);
     }

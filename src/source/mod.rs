@@ -4,6 +4,9 @@ pub mod image;
 pub mod manager;
 pub mod synthetic;
 
+#[cfg(feature = "camera")]
+pub mod camera;
+
 use bytes::Bytes;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
