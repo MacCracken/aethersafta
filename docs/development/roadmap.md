@@ -17,6 +17,17 @@ Completed items are in [CHANGELOG.md](../../CHANGELOG.md).
 
 ---
 
+## Next Sprint — Logging & Error Messaging
+
+- [ ] Audit all `tracing` spans and events — ensure structured fields on every operation (source name, frame count, pts, dimensions)
+- [ ] Standardize error messages — consistent format, actionable context, no raw debug formatting in user-facing output
+- [ ] Add `tracing::instrument` to public API entry points (compose, encode, capture, mix)
+- [ ] Review CLI error output — user-friendly messages with `anyhow` context chains, not raw backtraces
+- [ ] Add `--verbose` / `-v` CLI flag for debug-level tracing output
+- [ ] Ensure all new source modules (camera, screen, media) have consistent tracing coverage
+
+---
+
 ## v0.60.0 — Overlays, Transitions & Scene Switching
 
 ### Overlays
