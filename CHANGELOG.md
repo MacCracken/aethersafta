@@ -7,6 +7,82 @@ Pre-1.0 versioning uses `0.D.M` (day.month) SemVer.
 
 ---
 
+## [Unreleased]
+
+Multi-source capture, dependency upgrade to AGNOS 1.0 ecosystem, performance hardening, and three new capture source types.
+
+### Breaking (downstream note)
+
+- **`build_scene()` returns `VideoCaptureManager`** — the CLI function now returns `(SceneGraph, VideoCaptureManager)` instead of `(SceneGraph, Option<Box<dyn Source>>)`. `capture_source_frames()` replaced by `VideoCaptureManager::capture_all()` + `collect_layer_frames()`.
+- **`--source` CLI arg now accepts multiple values** — `--source screen --source camera:/dev/video0` layers sources bottom-to-top by order.
+
+### Added
+
+- **`VideoCaptureManager`** (`source::manager`) — multi-source orchestrator with per-source frame clocks, `SourceEvent` hot-plug notifications, and `collect_layer_frames()` compositor bridge
+- **V4L2 camera source** (`source::camera`, `camera` feature) — `CameraSource::open()` with auto-detect format negotiation (MJPEG > YUYV > NV12), `enumerate_cameras()` device discovery, YUYV→ARGB BT.601 and MJPEG→ARGB conversion
+- **Wayland screen capture** (`source::screen`, `wayland` feature) — `ScreenSource::open()` via `wlr-screencopy-unstable-v1` protocol with persistent shm buffer reuse, `enumerate_screens()` output discovery, XRGB→ARGB conversion with stride handling
+- **Media file source** (`source::media`, `openh264-dec` feature) — `MediaFileSource::open()` with tarang MP4 demuxer + OpenH264 decoder, loop playback, YUV420p→ARGB BT.709 conversion
+- **Encode buffer reuse** — `argb_to_yuv420p_into()`, `argb_to_nv12_into()` zero-alloc `_into` variants; `EncodePipeline` reuses YUV scratch buffer across frames via `Bytes::try_into_mut()` reclaim
+- **Compositor scaling scratch** — `Compositor` reuses a `scale_scratch` buffer for the resize path, eliminating per-frame `.to_vec()` allocation
+- **GPU compositor readback buffer** — `GpuCompositor` reuses `argb_scratch` for RGBA→ARGB conversion; `reclaim_buffer()` for frame data recovery
+- **Encode→decode roundtrip test** — H.264 encode via OpenH264, decode back, pixel comparison with lossy tolerance
+- **Buffer reuse benchmarks** — `_into` vs allocating variants at 1080p in `benches/convert.rs`
+- **RSS stability test** — 600 frames at 1080p30 with leak detection via `/proc/self/status` VmRSS
+- **Multi-source E2E test** — two synthetic sources at different FPS composited over 60 frames
+- **Benchmark regression CI gate** — `bench-regression` job in CI compares PR vs base via `critcmp`, fails on >10% regression
+- **`openh264-dec` feature** — enables tarang H.264 decoding for media file source and roundtrip tests
+- **`camera` feature** — gates `v4l` dependency for V4L2 camera capture
+- **`wayland` feature** — gates `wayland-client` + `wayland-protocols-wlr` + `libc` for screen capture
+- **Camera/screen enumeration in `aethersafta info`** — lists available V4L2 devices and Wayland outputs
+
+### Changed
+
+- **AGNOS crates upgraded to 1.0** — ranga 0.24.3→1.0.0, tarang 0.21.3→1.0.0, ai-hwaccel 0.23.3→1.0.0, dhvani 0.22.4→1.1.0, soorat 0.24.3→1.0.0
+- **wgpu 24→29** — via mabda 1.0.0 (soorat's GPU foundation layer)
+- **Non-exhaustive API migration** — all dhvani DSP params use builders/`Default` + mutate (e.g. `CompressorParams::new().with_threshold(-20.0)`), ranga `PixelBuffer.data` → `.data()`/`.into_data()`, dhvani `LevelMeter.lufs` → `.lufs()`
+- **`deny.toml`** — added `GPL-3.0-only` license (AGNOS 1.0 relicensed), removed stale `encoding_rs` clarify
+- **Compositor blend simplification** — removed redundant `all_opaque` row scan; ranga SIMD handles per-pixel fast paths internally
+- **Latency bench uses buffer reuse** — `benches/latency.rs` uses `argb_to_yuv420p_into` matching real pipeline
+
+### Fixed
+
+- **Input bounds guards** — `argb_to_yuv420p_into`, `argb_to_nv12_into`, `nv12_to_argb` early-return on undersized input instead of panic
+- **GPU compositor unwrap** — `texture_cache.get().unwrap()` replaced with defensive `let Some(...) else { continue }`
+- **`double_must_use` clippy lint** — `acquire_buffer()` `#[must_use]` given descriptive message for Rust 1.93 compatibility
+
+### Dependencies
+
+| Crate | Old | New | Notes |
+|-------|-----|-----|-------|
+| ranga | 0.24.3 | 1.0.0 | 1.0 stable, `PixelBuffer` fields now private |
+| tarang | 0.21.3 | 1.0.0 | 1.0 stable, `VideoFrame::new()` constructor |
+| dhvani | 0.22.4 | 1.1.0 | 1.0 stable, builder APIs for DSP params |
+| ai-hwaccel | 0.23.3 | 1.0.0 | 1.0 stable |
+| soorat | 0.24.3 | 1.0.0 | 1.0 stable, uses mabda for GPU |
+| wgpu | 24 | 29 | via mabda 1.0.0 |
+| v4l | — | 0.14 | new optional dep (camera feature) |
+| wayland-client | — | 0.31 | new optional dep (wayland feature) |
+| wayland-protocols-wlr | — | 0.3 | new optional dep (wayland feature) |
+| libc | — | 0.2 | new optional dep (wayland feature, for memfd/mmap) |
+
+### Performance
+
+| Metric | Before | After | Change |
+|--------|--------|-------|--------|
+| Compose 1080p (1 src) | ~29ms | ~27ms | **-10%** |
+| Audio mix 4096 frames | ~57µs | ~49µs | **-13%** |
+| Latency p99 pipeline | — | 20.9ms | 12.4ms headroom @ 30fps |
+| RSS growth (500 frames) | — | 0 MB | no leaks detected |
+
+### Code Quality
+
+- **259 tests** (unit + integration + proptest + doc-tests + fuzz targets)
+- **`#[non_exhaustive]`** on all new public structs: `VideoCaptureManager`, `SourceEvent`, `CameraInfo`, `ScreenInfo`
+- **`cargo audit`** clean, **`cargo deny`** clean, **`cargo clippy`** clean
+- All `unsafe` blocks in screen capture documented with `// SAFETY:` comments
+
+---
+
 ## [0.24.3] — 2026-03-24
 
 Code audit and scaffold hardening release: full DSP chain in graph pipeline, compositor buffer reuse, dependency cleanup, Architecture Decision Records, and comprehensive benchmark expansion.
